@@ -1,3 +1,4 @@
+# Full — OIDC app in Zitadel + Cloudflare Access + Ingress
 apiVersion: access.zitadel.com/v1alpha1
 kind: SecuredApplication
 metadata:
@@ -19,16 +20,21 @@ spec:
     backend:
       serviceName: grafana
       servicePort: 3000
+  deleteProtection: true
 ---
-# Minimal — uses all defaults, no tunnel
+# Non-OIDC app — Cloudflare Access only, no Zitadel app created
 apiVersion: access.zitadel.com/v1alpha1
 kind: SecuredApplication
 metadata:
-  name: internal-api
+  name: wiki
   namespace: default
 spec:
-  host: api.example.com
+  host: wiki.example.com
   access:
     project: infrastructure
     roles:
       - admin
+  tunnel:
+    backend:
+      serviceName: wiki
+      servicePort: 8080

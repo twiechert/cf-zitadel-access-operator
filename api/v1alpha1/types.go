@@ -12,8 +12,8 @@ import (
 // +kubebuilder:printcolumn:name="Ready",type=boolean,JSONPath=`.status.ready`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// SecuredApplication registers an OIDC application in Zitadel, protects it
-// with a Cloudflare Access policy based on Zitadel roles, and optionally
+// SecuredApplication protects a service with a Cloudflare Access policy based
+// on Zitadel roles. Optionally registers an OIDC application in Zitadel and/or
 // creates an Ingress for routing.
 type SecuredApplication struct {
 	metav1.TypeMeta   `json:",inline"`
@@ -30,7 +30,10 @@ type SecuredApplicationSpec struct {
 	// Access defines the Zitadel project and roles required to access this application.
 	Access Access `json:"access"`
 
-	// OIDC configures the Zitadel OIDC application.
+	// OIDC creates a Zitadel OIDC application and writes client credentials
+	// to a Kubernetes Secret. Only needed when the backend app does its own
+	// OAuth (e.g. Grafana). Omit for apps that rely solely on Cloudflare
+	// Access for authentication.
 	// +optional
 	OIDC *OIDCConfig `json:"oidc,omitempty"`
 
@@ -38,6 +41,12 @@ type SecuredApplicationSpec struct {
 	// When omitted, no Ingress is created.
 	// +optional
 	Tunnel *TunnelConfig `json:"tunnel,omitempty"`
+
+	// DeleteProtection prevents the operator from deleting external resources
+	// (Zitadel OIDC app, Cloudflare Access Application) when the CR is removed.
+	// Defaults to false.
+	// +optional
+	DeleteProtection bool `json:"deleteProtection,omitempty"`
 }
 
 type Access struct {

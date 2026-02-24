@@ -64,21 +64,25 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 	// Handle deletion.
 	if !app.DeletionTimestamp.IsZero() {
 		if controllerutil.ContainsFinalizer(&app, finalizerName) {
-			// Delete Zitadel OIDC app.
-			if app.Status.ZitadelAppID != "" && app.Status.ProjectID != "" {
-				logger.Info("deleting Zitadel OIDC app", "appId", app.Status.ZitadelAppID)
-				if err := r.Zitadel.DeleteApp(ctx, app.Status.ProjectID, app.Status.ZitadelAppID); err != nil {
-					logger.Error(err, "failed to delete Zitadel app, will retry")
-					return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+			if !app.Spec.DeleteProtection {
+				// Delete Zitadel OIDC app.
+				if app.Status.ZitadelAppID != "" && app.Status.ProjectID != "" {
+					logger.Info("deleting Zitadel OIDC app", "appId", app.Status.ZitadelAppID)
+					if err := r.Zitadel.DeleteApp(ctx, app.Status.ProjectID, app.Status.ZitadelAppID); err != nil {
+						logger.Error(err, "failed to delete Zitadel app, will retry")
+						return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+					}
 				}
-			}
-			// Delete Cloudflare Access Application.
-			if app.Status.AccessApplicationID != "" {
-				logger.Info("deleting Cloudflare Access Application", "appId", app.Status.AccessApplicationID)
-				if err := r.Cloudflare.DeleteAccessApp(ctx, app.Status.AccessApplicationID); err != nil {
-					logger.Error(err, "failed to delete Access Application, will retry")
-					return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+				// Delete Cloudflare Access Application.
+				if app.Status.AccessApplicationID != "" {
+					logger.Info("deleting Cloudflare Access Application", "appId", app.Status.AccessApplicationID)
+					if err := r.Cloudflare.DeleteAccessApp(ctx, app.Status.AccessApplicationID); err != nil {
+						logger.Error(err, "failed to delete Access Application, will retry")
+						return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+					}
 				}
+			} else {
+				logger.Info("delete protection enabled, keeping external resources")
 			}
 			// Ingress + Secret cleaned up via ownerReference GC.
 			controllerutil.RemoveFinalizer(&app, finalizerName)
@@ -123,17 +127,22 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		}
 	}
 
-	// 3. Reconcile Zitadel OIDC application.
-	oidcApp, clientSecret, err := r.reconcileZitadelApp(ctx, &app, project.ID)
-	if err != nil {
-		return r.setCondition(ctx, &app, metav1.ConditionFalse, "ZitadelAppFailed", err.Error())
-	}
-	logger.Info("reconciled Zitadel OIDC app", "appId", oidcApp.ID, "clientId", oidcApp.ClientID)
+	// 3. Reconcile Zitadel OIDC application (only when spec.oidc is set).
+	if app.Spec.OIDC != nil {
+		oidcApp, clientSecret, err := r.reconcileZitadelApp(ctx, &app, project.ID)
+		if err != nil {
+			return r.setCondition(ctx, &app, metav1.ConditionFalse, "ZitadelAppFailed", err.Error())
+		}
+		logger.Info("reconciled Zitadel OIDC app", "appId", oidcApp.ID, "clientId", oidcApp.ClientID)
 
-	// Write credentials to K8s Secret (only on initial creation when we have the client secret).
-	if clientSecret != "" {
-		if err := r.writeCredentialSecret(ctx, &app, oidcApp.ClientID, clientSecret); err != nil {
-			return r.setCondition(ctx, &app, metav1.ConditionFalse, "SecretFailed", err.Error())
+		app.Status.ZitadelAppID = oidcApp.ID
+		app.Status.ClientID = oidcApp.ClientID
+
+		// Write credentials to K8s Secret (only on initial creation when we have the client secret).
+		if clientSecret != "" {
+			if err := r.writeCredentialSecret(ctx, &app, oidcApp.ClientID, clientSecret); err != nil {
+				return r.setCondition(ctx, &app, metav1.ConditionFalse, "SecretFailed", err.Error())
+			}
 		}
 	}
 
@@ -189,8 +198,6 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 	// 6. Update status.
 	app.Status.ProjectID = project.ID
-	app.Status.ZitadelAppID = oidcApp.ID
-	app.Status.ClientID = oidcApp.ClientID
 	app.Status.AccessApplicationID = accessAppID
 	app.Status.AccessPolicyID = policy.ID
 	app.Status.Ready = true
@@ -198,34 +205,26 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 }
 
 func (r *SecuredApplicationReconciler) reconcileZitadelApp(ctx context.Context, app *accessv1alpha1.SecuredApplication, projectID string) (*zitadel.App, string, error) {
-	// Build OIDC config with defaults.
+	oidc := app.Spec.OIDC
+
 	redirectURIs := []string{fmt.Sprintf("https://%s/callback", app.Spec.Host)}
-	if app.Spec.OIDC != nil && len(app.Spec.OIDC.RedirectURIs) > 0 {
-		redirectURIs = app.Spec.OIDC.RedirectURIs
+	if len(oidc.RedirectURIs) > 0 {
+		redirectURIs = oidc.RedirectURIs
 	}
 
 	config := zitadel.AppConfig{
-		Name:         app.Name,
-		RedirectURIs: redirectURIs,
-	}
-
-	if app.Spec.OIDC != nil {
-		config.PostLogoutRedirectURIs = app.Spec.OIDC.PostLogoutRedirectURIs
-		config.ResponseTypes = withDefault(app.Spec.OIDC.ResponseTypes, []string{"OIDC_RESPONSE_TYPE_CODE"})
-		config.GrantTypes = withDefault(app.Spec.OIDC.GrantTypes, []string{"OIDC_GRANT_TYPE_AUTHORIZATION_CODE"})
-		config.AppType = withDefault1(app.Spec.OIDC.AppType, "OIDC_APP_TYPE_WEB")
-		config.AuthMethodType = withDefault1(app.Spec.OIDC.AuthMethodType, "OIDC_AUTH_METHOD_TYPE_BASIC")
-		config.AccessTokenType = withDefault1(app.Spec.OIDC.AccessTokenType, "OIDC_TOKEN_TYPE_BEARER")
-		config.DevMode = app.Spec.OIDC.DevMode
-		config.IDTokenRoleAssertion = app.Spec.OIDC.IDTokenRoleAssertion
-		config.IDTokenUserinfoAssertion = app.Spec.OIDC.IDTokenUserinfoAssertion
-		config.AccessTokenRoleAssertion = app.Spec.OIDC.AccessTokenRoleAssertion
-	} else {
-		config.ResponseTypes = []string{"OIDC_RESPONSE_TYPE_CODE"}
-		config.GrantTypes = []string{"OIDC_GRANT_TYPE_AUTHORIZATION_CODE"}
-		config.AppType = "OIDC_APP_TYPE_WEB"
-		config.AuthMethodType = "OIDC_AUTH_METHOD_TYPE_BASIC"
-		config.AccessTokenType = "OIDC_TOKEN_TYPE_BEARER"
+		Name:                     app.Name,
+		RedirectURIs:             redirectURIs,
+		PostLogoutRedirectURIs:   oidc.PostLogoutRedirectURIs,
+		ResponseTypes:            withDefault(oidc.ResponseTypes, []string{"OIDC_RESPONSE_TYPE_CODE"}),
+		GrantTypes:               withDefault(oidc.GrantTypes, []string{"OIDC_GRANT_TYPE_AUTHORIZATION_CODE"}),
+		AppType:                  withDefault1(oidc.AppType, "OIDC_APP_TYPE_WEB"),
+		AuthMethodType:           withDefault1(oidc.AuthMethodType, "OIDC_AUTH_METHOD_TYPE_BASIC"),
+		AccessTokenType:          withDefault1(oidc.AccessTokenType, "OIDC_TOKEN_TYPE_BEARER"),
+		DevMode:                  oidc.DevMode,
+		IDTokenRoleAssertion:     oidc.IDTokenRoleAssertion,
+		IDTokenUserinfoAssertion: oidc.IDTokenUserinfoAssertion,
+		AccessTokenRoleAssertion: oidc.AccessTokenRoleAssertion,
 	}
 
 	// Check if app already exists.

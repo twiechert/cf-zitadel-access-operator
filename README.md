@@ -1,8 +1,14 @@
 # zitadel-access-operator
 
-A Kubernetes operator that registers OIDC applications in [Zitadel](https://zitadel.com), protects them with [Cloudflare Access](https://www.cloudflare.com/zero-trust/products/access/) policies based on Zitadel roles, and optionally creates an Ingress for routing.
+A Kubernetes operator that protects services with [Cloudflare Access](https://www.cloudflare.com/zero-trust/products/access/) using [Zitadel](https://zitadel.com) OIDC roles. Optionally registers OIDC applications in Zitadel and creates Ingress resources for routing.
 
 No Cloudflare Access Groups needed. Zitadel remains the single source of truth for authorization.
+
+## Prerequisites
+
+- A Zitadel instance with projects and roles configured
+- Zitadel configured as an [Identity Provider in Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/identity/idp-integration/generic-oidc/) — users authenticate via Zitadel when accessing any protected domain
+- A Cloudflare API token with Access permissions
 
 ## How it works
 
@@ -12,21 +18,49 @@ SecuredApplication CR
         ▼
   zitadel-access-operator
         │
-        ├─ Zitadel (write)
+        ├─ Zitadel
         │    ├─ Validates project & roles exist
-        │    ├─ Creates OIDC application
-        │    └─ Writes client credentials to K8s Secret
+        │    └─ Creates OIDC application (optional, when spec.oidc is set)
         │
         ├─ Cloudflare (write)
         │    └─ Creates Access Application with OIDC claim policy per role
         │
         └─ Kubernetes (write, optional)
-             └─ Creates Ingress for routing (e.g. via CF tunnel controller)
+             ├─ Creates Ingress for routing (when spec.tunnel is set)
+             └─ Writes OIDC credentials to Secret (when spec.oidc is set)
 ```
 
-From a single CR the operator provisions resources across three systems: a Zitadel OIDC application, a Cloudflare Access Application with inline OIDC claim policies (checking Zitadel JWT role claims directly), and optionally a Kubernetes Ingress.
+Every `SecuredApplication` creates a Cloudflare Access Application with inline OIDC claim policies that check Zitadel JWT role claims directly. Cloudflare Access handles authentication at the edge — the backend app doesn't need to know about OIDC.
 
-## Custom Resource
+For apps that also do their own OAuth (e.g. Grafana), set `spec.oidc` to register an OIDC application in Zitadel and write the client credentials to a Kubernetes Secret.
+
+## Examples
+
+### Non-OIDC app (most common)
+
+Cloudflare Access protects the app, only users with the right Zitadel roles get through:
+
+```yaml
+apiVersion: access.zitadel.com/v1alpha1
+kind: SecuredApplication
+metadata:
+  name: wiki
+  namespace: default
+spec:
+  host: wiki.example.com
+  access:
+    project: infrastructure
+    roles:
+      - admin
+  tunnel:
+    backend:
+      serviceName: wiki
+      servicePort: 8080
+```
+
+### OIDC app (e.g. Grafana)
+
+Same Cloudflare Access protection, plus a Zitadel OIDC app so the backend can do its own OAuth:
 
 ```yaml
 apiVersion: access.zitadel.com/v1alpha1
@@ -37,31 +71,32 @@ metadata:
 spec:
   host: grafana.example.com
   access:
-    project: infrastructure   # Zitadel project name (resolved to ID automatically)
+    project: infrastructure
     roles:
       - admin
       - viewer
-  oidc:                        # optional — OIDC app settings
+  oidc:
     redirectURIs:
       - https://grafana.example.com/login/generic_oauth
     idTokenRoleAssertion: true
     accessTokenRoleAssertion: true
-  tunnel:                      # optional — creates an Ingress
+  tunnel:
     backend:
       serviceName: grafana
       servicePort: 3000
+  deleteProtection: true
 ```
 
 The operator will:
 
-1. Look up the Zitadel project `infrastructure` and verify `admin` and `viewer` roles exist
-2. Create a Zitadel OIDC application and write the client credentials to a Kubernetes Secret (`grafana-oidc` by default, configurable via `oidc.clientSecretRef`)
-3. Create a Cloudflare Access Application for `grafana.example.com` with a policy that checks the Zitadel JWT role claim directly
+1. Look up the Zitadel project `infrastructure` and verify the requested roles exist
+2. Create a Cloudflare Access Application for the host with a policy that checks the Zitadel JWT role claim directly
+3. If `oidc` is set, create a Zitadel OIDC application and write client credentials to a Kubernetes Secret (`{name}-oidc` by default, configurable via `oidc.clientSecretRef`)
 4. If `tunnel` is set, create an Ingress (defaults to `ingressClassName: cloudflare-tunnel`, overridable via `tunnel.ingress.className`)
 
-Omit `tunnel` to skip Ingress creation. Omit `oidc` to use sensible defaults (redirect to `https://{host}/callback`, authorization code flow, basic auth).
+### Delete protection
 
-Delete the CR and everything is cleaned up (Zitadel OIDC app + Cloudflare Access Application via finalizer, Ingress + Secret via owner reference).
+Set `deleteProtection: true` to keep external resources (Zitadel OIDC app, Cloudflare Access Application) when the CR is deleted. Kubernetes resources (Ingress, Secret) are always cleaned up via owner references.
 
 ## Installation
 
