@@ -1,0 +1,18 @@
+# Binaries
+bin/
+zitadel-operator
+
+# Go
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Test
+cover.out
+bin/

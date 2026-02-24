@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "zitadel-access-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "zitadel-access-operator.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "zitadel-access-operator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "zitadel-access-operator.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "zitadel-access-operator.serviceAccountName" . }}
+      containers:
+        - name: operator
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --zitadel-url={{ .Values.zitadel.url }}
+            - --cloudflare-account-id={{ .Values.cloudflare.accountId }}
+            - --cloudflare-idp-id={{ .Values.cloudflare.idpId }}
+            - --default-ingress-class={{ .Values.config.defaultIngressClass }}
+            - --session-duration={{ .Values.config.sessionDuration }}
+            - --metrics-bind-address=:8080
+            - --health-probe-bind-address=:8081
+            {{- if .Values.config.leaderElect }}
+            - --leader-elect
+            {{- end }}
+          env:
+            - name: ZITADEL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "zitadel-access-operator.secretName" . }}
+                  key: zitadel-token
+            - name: CLOUDFLARE_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "zitadel-access-operator.secretName" . }}
+                  key: cloudflare-api-token
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+            - name: health
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

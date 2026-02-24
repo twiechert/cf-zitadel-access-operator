@@ -1,0 +1,15 @@
+apiVersion: access.zitadel.com/v1alpha1
+kind: SecuredApplication
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  host: grafana.twiechert.de
+  backend:
+    serviceName: grafana
+    servicePort: 3000
+  access:
+    project: infrastructure
+    roles:
+      - admin
+      - viewer

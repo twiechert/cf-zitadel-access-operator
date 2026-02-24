@@ -1,0 +1,48 @@
+image:
+  repository: ghcr.io/twiechert/zitadel-access-operator
+  tag: ""  # Defaults to appVersion
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+serviceAccount:
+  create: true
+  name: ""
+
+# Zitadel configuration
+zitadel:
+  # Required: URL of the Zitadel instance (e.g. https://zitadel.example.com)
+  url: ""
+  # Sensitive: Zitadel PAT token. Ignored if existingSecret is set.
+  token: ""
+
+# Cloudflare configuration
+cloudflare:
+  # Sensitive: Cloudflare API token. Ignored if existingSecret is set.
+  apiToken: ""
+  # Required: Cloudflare account ID
+  accountId: ""
+  # Required: Cloudflare Access IdP ID (the Zitadel OIDC identity provider)
+  idpId: ""
+
+# Operator behaviour
+config:
+  defaultIngressClass: cloudflare-tunnel
+  sessionDuration: "24h"
+  leaderElect: false
+
+# Name of an existing Secret containing keys: zitadel-token, cloudflare-api-token.
+# When set, the chart will NOT create its own Secret.
+existingSecret: ""
+
+resources: {}
+  # limits:
+  #   cpu: 500m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 10m
+  #   memory: 64Mi
+
+nodeSelector: {}
+
+tolerations: []
