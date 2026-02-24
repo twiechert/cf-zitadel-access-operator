@@ -24,6 +24,10 @@ import (
 const (
 	finalizerName = "access.zitadel.com/finalizer"
 
+	// The custom:roles claim is a flat array produced by a Zitadel Action (flatRoles).
+	// Cloudflare Access can't match Zitadel's default nested role claim format.
+	roleClaimName = "custom:roles"
+
 	cfBackendProtocolAnnotation = "cloudflare-tunnel-ingress-controller.strrl.dev/backend-protocol"
 )
 
@@ -65,7 +69,6 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 	if !app.DeletionTimestamp.IsZero() {
 		if controllerutil.ContainsFinalizer(&app, finalizerName) {
 			if !app.Spec.DeleteProtection {
-				// Delete Zitadel OIDC app.
 				if app.Status.ZitadelAppID != "" && app.Status.ProjectID != "" {
 					logger.Info("deleting Zitadel OIDC app", "appId", app.Status.ZitadelAppID)
 					if err := r.Zitadel.DeleteApp(ctx, app.Status.ProjectID, app.Status.ZitadelAppID); err != nil {
@@ -73,7 +76,6 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 						return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 					}
 				}
-				// Delete Cloudflare Access Application.
 				if app.Status.AccessApplicationID != "" {
 					logger.Info("deleting Cloudflare Access Application", "appId", app.Status.AccessApplicationID)
 					if err := r.Cloudflare.DeleteAccessApp(ctx, app.Status.AccessApplicationID); err != nil {
@@ -127,28 +129,21 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		}
 	}
 
-	// 3. Reconcile Zitadel OIDC application (only when spec.oidc is set).
-	if app.Spec.OIDC != nil {
-		oidcApp, clientSecret, err := r.reconcileZitadelApp(ctx, &app, project.ID)
-		if err != nil {
-			return r.setCondition(ctx, &app, metav1.ConditionFalse, "ZitadelAppFailed", err.Error())
-		}
-		logger.Info("reconciled Zitadel OIDC app", "appId", oidcApp.ID, "clientId", oidcApp.ClientID)
+	// 3. Reconcile Zitadel OIDC application.
+	oidcApp, clientSecret, err := r.reconcileZitadelApp(ctx, &app, project.ID)
+	if err != nil {
+		return r.setCondition(ctx, &app, metav1.ConditionFalse, "ZitadelAppFailed", err.Error())
+	}
+	logger.Info("reconciled Zitadel OIDC app", "appId", oidcApp.ID, "clientId", oidcApp.ClientID)
 
-		app.Status.ZitadelAppID = oidcApp.ID
-		app.Status.ClientID = oidcApp.ClientID
-
-		// Write credentials to K8s Secret (only on initial creation when we have the client secret).
-		if clientSecret != "" {
-			if err := r.writeCredentialSecret(ctx, &app, oidcApp.ClientID, clientSecret); err != nil {
-				return r.setCondition(ctx, &app, metav1.ConditionFalse, "SecretFailed", err.Error())
-			}
+	// Write credentials to K8s Secret (only on initial creation when we have the client secret).
+	if clientSecret != "" {
+		if err := r.writeCredentialSecret(ctx, &app, oidcApp.ClientID, clientSecret); err != nil {
+			return r.setCondition(ctx, &app, metav1.ConditionFalse, "SecretFailed", err.Error())
 		}
 	}
 
-	// 4. Reconcile Cloudflare Access Application with inline OIDC claim policies.
-	roleClaim := fmt.Sprintf("urn:zitadel:iam:org:project:%s:roles", project.ID)
-
+	// 4. Reconcile Cloudflare Access Application with OIDC claim policy.
 	accessAppID := app.Status.AccessApplicationID
 	if accessAppID == "" {
 		existing, err := r.Cloudflare.FindAccessAppByDomain(ctx, app.Spec.Host)
@@ -178,7 +173,7 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 	for i, role := range app.Spec.Access.Roles {
 		rules[i] = cfclient.OIDCClaimRule{
 			IdentityProviderID: r.Config.CloudflareIdPID,
-			ClaimName:          roleClaim,
+			ClaimName:          roleClaimName,
 			ClaimValue:         role,
 		}
 	}
@@ -188,16 +183,16 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return r.setCondition(ctx, &app, metav1.ConditionFalse, "PolicyFailed", err.Error())
 	}
 
-	// 5. Reconcile Ingress if tunnel is configured.
-	if app.Spec.Tunnel != nil {
-		if err := r.reconcileIngress(ctx, &app); err != nil {
-			return r.setCondition(ctx, &app, metav1.ConditionFalse, "IngressFailed", err.Error())
-		}
-		logger.Info("reconciled ingress", "name", app.Name)
+	// 5. Reconcile Ingress.
+	if err := r.reconcileIngress(ctx, &app); err != nil {
+		return r.setCondition(ctx, &app, metav1.ConditionFalse, "IngressFailed", err.Error())
 	}
+	logger.Info("reconciled ingress", "name", app.Name)
 
 	// 6. Update status.
 	app.Status.ProjectID = project.ID
+	app.Status.ZitadelAppID = oidcApp.ID
+	app.Status.ClientID = oidcApp.ClientID
 	app.Status.AccessApplicationID = accessAppID
 	app.Status.AccessPolicyID = policy.ID
 	app.Status.Ready = true
@@ -205,29 +200,44 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 }
 
 func (r *SecuredApplicationReconciler) reconcileZitadelApp(ctx context.Context, app *accessv1alpha1.SecuredApplication, projectID string) (*zitadel.App, string, error) {
-	oidc := app.Spec.OIDC
-
 	redirectURIs := []string{fmt.Sprintf("https://%s/callback", app.Spec.Host)}
-	if len(oidc.RedirectURIs) > 0 {
-		redirectURIs = oidc.RedirectURIs
-	}
-
 	config := zitadel.AppConfig{
-		Name:                     app.Name,
-		RedirectURIs:             redirectURIs,
-		PostLogoutRedirectURIs:   oidc.PostLogoutRedirectURIs,
-		ResponseTypes:            withDefault(oidc.ResponseTypes, []string{"OIDC_RESPONSE_TYPE_CODE"}),
-		GrantTypes:               withDefault(oidc.GrantTypes, []string{"OIDC_GRANT_TYPE_AUTHORIZATION_CODE"}),
-		AppType:                  withDefault1(oidc.AppType, "OIDC_APP_TYPE_WEB"),
-		AuthMethodType:           withDefault1(oidc.AuthMethodType, "OIDC_AUTH_METHOD_TYPE_BASIC"),
-		AccessTokenType:          withDefault1(oidc.AccessTokenType, "OIDC_TOKEN_TYPE_BEARER"),
-		DevMode:                  oidc.DevMode,
-		IDTokenRoleAssertion:     oidc.IDTokenRoleAssertion,
-		IDTokenUserinfoAssertion: oidc.IDTokenUserinfoAssertion,
-		AccessTokenRoleAssertion: oidc.AccessTokenRoleAssertion,
+		Name:            app.Name,
+		RedirectURIs:    redirectURIs,
+		ResponseTypes:   []string{"OIDC_RESPONSE_TYPE_CODE"},
+		GrantTypes:      []string{"OIDC_GRANT_TYPE_AUTHORIZATION_CODE"},
+		AppType:         "OIDC_APP_TYPE_WEB",
+		AuthMethodType:  "OIDC_AUTH_METHOD_TYPE_BASIC",
+		AccessTokenType: "OIDC_TOKEN_TYPE_BEARER",
 	}
 
-	// Check if app already exists.
+	if app.Spec.OIDC != nil {
+		if len(app.Spec.OIDC.RedirectURIs) > 0 {
+			config.RedirectURIs = app.Spec.OIDC.RedirectURIs
+		}
+		config.PostLogoutRedirectURIs = app.Spec.OIDC.PostLogoutRedirectURIs
+		if len(app.Spec.OIDC.ResponseTypes) > 0 {
+			config.ResponseTypes = app.Spec.OIDC.ResponseTypes
+		}
+		if len(app.Spec.OIDC.GrantTypes) > 0 {
+			config.GrantTypes = app.Spec.OIDC.GrantTypes
+		}
+		if app.Spec.OIDC.AppType != "" {
+			config.AppType = app.Spec.OIDC.AppType
+		}
+		if app.Spec.OIDC.AuthMethodType != "" {
+			config.AuthMethodType = app.Spec.OIDC.AuthMethodType
+		}
+		if app.Spec.OIDC.AccessTokenType != "" {
+			config.AccessTokenType = app.Spec.OIDC.AccessTokenType
+		}
+		config.DevMode = app.Spec.OIDC.DevMode
+		config.IDTokenRoleAssertion = app.Spec.OIDC.IDTokenRoleAssertion
+		config.IDTokenUserinfoAssertion = app.Spec.OIDC.IDTokenUserinfoAssertion
+		config.AccessTokenRoleAssertion = app.Spec.OIDC.AccessTokenRoleAssertion
+	}
+
+	// Update existing app.
 	if app.Status.ZitadelAppID != "" {
 		if err := r.Zitadel.UpdateApp(ctx, projectID, app.Status.ZitadelAppID, config); err != nil {
 			return nil, "", err
@@ -285,8 +295,6 @@ func (r *SecuredApplicationReconciler) writeCredentialSecret(ctx context.Context
 }
 
 func (r *SecuredApplicationReconciler) reconcileIngress(ctx context.Context, app *accessv1alpha1.SecuredApplication) error {
-	tunnel := app.Spec.Tunnel
-
 	ingress := &networkingv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      app.Name,
@@ -300,29 +308,29 @@ func (r *SecuredApplicationReconciler) reconcileIngress(ctx context.Context, app
 		}
 
 		className := "cloudflare-tunnel"
-		if tunnel.Ingress != nil && tunnel.Ingress.ClassName != "" {
-			className = tunnel.Ingress.ClassName
+		if app.Spec.Ingress != nil && app.Spec.Ingress.ClassName != "" {
+			className = app.Spec.Ingress.ClassName
 		}
 		ingress.Spec.IngressClassName = &className
 
 		annotations := make(map[string]string)
-		if tunnel.Ingress != nil {
-			for k, v := range tunnel.Ingress.Annotations {
+		if app.Spec.Ingress != nil {
+			for k, v := range app.Spec.Ingress.Annotations {
 				annotations[k] = v
 			}
 		}
-		if tunnel.Backend.Protocol != "" {
-			annotations[cfBackendProtocolAnnotation] = tunnel.Backend.Protocol
+		if app.Spec.Backend.Protocol != "" {
+			annotations[cfBackendProtocolAnnotation] = app.Spec.Backend.Protocol
 		}
 		ingress.Annotations = annotations
 
 		pathType := networkingv1.PathTypePrefix
-		if tunnel.Ingress != nil && tunnel.Ingress.PathType != "" {
-			pathType = networkingv1.PathType(tunnel.Ingress.PathType)
+		if app.Spec.Ingress != nil && app.Spec.Ingress.PathType != "" {
+			pathType = networkingv1.PathType(app.Spec.Ingress.PathType)
 		}
 		path := "/"
-		if tunnel.Ingress != nil && tunnel.Ingress.Path != "" {
-			path = tunnel.Ingress.Path
+		if app.Spec.Ingress != nil && app.Spec.Ingress.Path != "" {
+			path = app.Spec.Ingress.Path
 		}
 
 		ingress.Spec.Rules = []networkingv1.IngressRule{
@@ -336,9 +344,9 @@ func (r *SecuredApplicationReconciler) reconcileIngress(ctx context.Context, app
 								PathType: &pathType,
 								Backend: networkingv1.IngressBackend{
 									Service: &networkingv1.IngressServiceBackend{
-										Name: tunnel.Backend.ServiceName,
+										Name: app.Spec.Backend.ServiceName,
 										Port: networkingv1.ServiceBackendPort{
-											Number: tunnel.Backend.ServicePort,
+											Number: app.Spec.Backend.ServicePort,
 										},
 									},
 								},
@@ -381,18 +389,4 @@ func (r *SecuredApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error 
 		Owns(&networkingv1.Ingress{}).
 		Owns(&corev1.Secret{}).
 		Complete(r)
-}
-
-func withDefault(val, def []string) []string {
-	if len(val) == 0 {
-		return def
-	}
-	return val
-}
-
-func withDefault1(val, def string) string {
-	if val == "" {
-		return def
-	}
-	return val
 }

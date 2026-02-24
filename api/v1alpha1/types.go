@@ -12,9 +12,9 @@ import (
 // +kubebuilder:printcolumn:name="Ready",type=boolean,JSONPath=`.status.ready`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// SecuredApplication protects a service with a Cloudflare Access policy based
-// on Zitadel roles. Optionally registers an OIDC application in Zitadel and/or
-// creates an Ingress for routing.
+// SecuredApplication registers an OIDC application in Zitadel, protects it
+// with a Cloudflare Access policy based on Zitadel roles, and routes traffic
+// through a Cloudflare Tunnel Ingress.
 type SecuredApplication struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -30,17 +30,17 @@ type SecuredApplicationSpec struct {
 	// Access defines the Zitadel project and roles required to access this application.
 	Access Access `json:"access"`
 
-	// OIDC creates a Zitadel OIDC application and writes client credentials
-	// to a Kubernetes Secret. Only needed when the backend app does its own
-	// OAuth (e.g. Grafana). Omit for apps that rely solely on Cloudflare
-	// Access for authentication.
+	// Backend defines the Kubernetes Service to route traffic to.
+	Backend Backend `json:"backend"`
+
+	// OIDC allows overriding defaults for the Zitadel OIDC application.
+	// The OIDC app is always created; this section customizes it.
 	// +optional
 	OIDC *OIDCConfig `json:"oidc,omitempty"`
 
-	// Tunnel creates an Ingress for routing (e.g. via Cloudflare Tunnel).
-	// When omitted, no Ingress is created.
+	// Ingress allows overriding generated Ingress settings.
 	// +optional
-	Tunnel *TunnelConfig `json:"tunnel,omitempty"`
+	Ingress *IngressConfig `json:"ingress,omitempty"`
 
 	// DeleteProtection prevents the operator from deleting external resources
 	// (Zitadel OIDC app, Cloudflare Access Application) when the CR is removed.
@@ -56,6 +56,18 @@ type Access struct {
 	// Roles lists the Zitadel project roles allowed to access this application.
 	// +kubebuilder:validation:MinItems=1
 	Roles []string `json:"roles"`
+}
+
+type Backend struct {
+	// ServiceName is the name of the Kubernetes Service.
+	ServiceName string `json:"serviceName"`
+
+	// ServicePort is the port number on the Service.
+	ServicePort int32 `json:"servicePort"`
+
+	// Protocol overrides the backend protocol (e.g. "https").
+	// +optional
+	Protocol string `json:"protocol,omitempty"`
 }
 
 type OIDCConfig struct {
@@ -109,27 +121,6 @@ type OIDCConfig struct {
 	// "clientId" and "clientSecret" keys.
 	// +optional
 	ClientSecretRef string `json:"clientSecretRef,omitempty"`
-}
-
-type TunnelConfig struct {
-	// Backend defines the Kubernetes Service to route traffic to.
-	Backend Backend `json:"backend"`
-
-	// Ingress allows overriding generated Ingress settings.
-	// +optional
-	Ingress *IngressConfig `json:"ingress,omitempty"`
-}
-
-type Backend struct {
-	// ServiceName is the name of the Kubernetes Service.
-	ServiceName string `json:"serviceName"`
-
-	// ServicePort is the port number on the Service.
-	ServicePort int32 `json:"servicePort"`
-
-	// Protocol overrides the backend protocol (e.g. "https").
-	// +optional
-	Protocol string `json:"protocol,omitempty"`
 }
 
 type IngressConfig struct {

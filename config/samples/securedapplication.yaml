@@ -1,4 +1,4 @@
-# Full — OIDC app in Zitadel + Cloudflare Access + Ingress
+# Full — with custom OIDC settings for Grafana
 apiVersion: access.zitadel.com/v1alpha1
 kind: SecuredApplication
 metadata:
@@ -11,18 +11,17 @@ spec:
     roles:
       - admin
       - viewer
+  backend:
+    serviceName: grafana
+    servicePort: 3000
   oidc:
     redirectURIs:
       - https://grafana.example.com/login/generic_oauth
     idTokenRoleAssertion: true
     accessTokenRoleAssertion: true
-  tunnel:
-    backend:
-      serviceName: grafana
-      servicePort: 3000
   deleteProtection: true
 ---
-# Non-OIDC app — Cloudflare Access only, no Zitadel app created
+# Minimal — defaults for everything
 apiVersion: access.zitadel.com/v1alpha1
 kind: SecuredApplication
 metadata:
@@ -34,7 +33,6 @@ spec:
     project: infrastructure
     roles:
       - admin
-  tunnel:
-    backend:
-      serviceName: wiki
-      servicePort: 8080
+  backend:
+    serviceName: wiki
+    servicePort: 8080

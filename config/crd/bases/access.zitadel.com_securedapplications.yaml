@@ -34,9 +34,9 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          SecuredApplication protects a service with a Cloudflare Access policy based
-          on Zitadel roles. Optionally registers an OIDC application in Zitadel and/or
-          creates an Ingress for routing.
+          SecuredApplication registers an OIDC application in Zitadel, protects it
+          with a Cloudflare Access policy based on Zitadel roles, and routes traffic
+          through a Cloudflare Tunnel Ingress.
         properties:
           apiVersion:
             description: |-
@@ -76,6 +76,24 @@ spec:
                 - project
                 - roles
                 type: object
+              backend:
+                description: Backend defines the Kubernetes Service to route traffic
+                  to.
+                properties:
+                  protocol:
+                    description: Protocol overrides the backend protocol (e.g. "https").
+                    type: string
+                  serviceName:
+                    description: ServiceName is the name of the Kubernetes Service.
+                    type: string
+                  servicePort:
+                    description: ServicePort is the port number on the Service.
+                    format: int32
+                    type: integer
+                required:
+                - serviceName
+                - servicePort
+                type: object
               deleteProtection:
                 description: |-
                   DeleteProtection prevents the operator from deleting external resources
@@ -85,12 +103,29 @@ spec:
               host:
                 description: Host is the public hostname for this application.
                 type: string
+              ingress:
+                description: Ingress allows overriding generated Ingress settings.
+                properties:
+                  annotations:
+                    additionalProperties:
+                      type: string
+                    description: Annotations to add to the generated Ingress.
+                    type: object
+                  className:
+                    description: ClassName overrides the default Ingress class (defaults
+                      to "cloudflare-tunnel").
+                    type: string
+                  path:
+                    description: Path defaults to "/".
+                    type: string
+                  pathType:
+                    description: PathType defaults to "Prefix".
+                    type: string
+                type: object
               oidc:
                 description: |-
-                  OIDC creates a Zitadel OIDC application and writes client credentials
-                  to a Kubernetes Secret. Only needed when the backend app does its own
-                  OAuth (e.g. Grafana). Omit for apps that rely solely on Cloudflare
-                  Access for authentication.
+                  OIDC allows overriding defaults for the Zitadel OIDC application.
+                  The OIDC app is always created; this section customizes it.
                 properties:
                   accessTokenRoleAssertion:
                     description: AccessTokenRoleAssertion includes roles in the access
@@ -145,54 +180,9 @@ spec:
                       type: string
                     type: array
                 type: object
-              tunnel:
-                description: |-
-                  Tunnel creates an Ingress for routing (e.g. via Cloudflare Tunnel).
-                  When omitted, no Ingress is created.
-                properties:
-                  backend:
-                    description: Backend defines the Kubernetes Service to route traffic
-                      to.
-                    properties:
-                      protocol:
-                        description: Protocol overrides the backend protocol (e.g.
-                          "https").
-                        type: string
-                      serviceName:
-                        description: ServiceName is the name of the Kubernetes Service.
-                        type: string
-                      servicePort:
-                        description: ServicePort is the port number on the Service.
-                        format: int32
-                        type: integer
-                    required:
-                    - serviceName
-                    - servicePort
-                    type: object
-                  ingress:
-                    description: Ingress allows overriding generated Ingress settings.
-                    properties:
-                      annotations:
-                        additionalProperties:
-                          type: string
-                        description: Annotations to add to the generated Ingress.
-                        type: object
-                      className:
-                        description: ClassName overrides the default Ingress class
-                          (defaults to "cloudflare-tunnel").
-                        type: string
-                      path:
-                        description: Path defaults to "/".
-                        type: string
-                      pathType:
-                        description: PathType defaults to "Prefix".
-                        type: string
-                    type: object
-                required:
-                - backend
-                type: object
             required:
             - access
+            - backend
             - host
             type: object
           status:
