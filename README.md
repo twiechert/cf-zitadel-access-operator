@@ -1,0 +1,112 @@
+# zitadel-access-operator
+
+A Kubernetes operator that bridges [Zitadel](https://zitadel.com) and [Cloudflare Access](https://www.cloudflare.com/zero-trust/products/access/). It lets you declare which Zitadel roles can access a service — the operator creates the Cloudflare Access Application with inline OIDC claim policies and an Ingress for tunnel routing.
+
+No Cloudflare Access Groups needed. Zitadel remains the single source of truth for authorization.
+
+## How it works
+
+```
+SecuredApplication CR
+        │
+        ▼
+  zitadel-access-operator
+        │
+        ├─ Validates project & roles exist in Zitadel (read-only)
+        │
+        ├─ Creates Cloudflare Access Application
+        │    └─ Inline OIDC claim policy per role (no Access Groups)
+        │
+        └─ Creates Ingress
+             └─ Picked up by CF tunnel ingress controller (routing only)
+```
+
+## Custom Resource
+
+```yaml
+apiVersion: access.zitadel.com/v1alpha1
+kind: SecuredApplication
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  host: grafana.example.com
+  backend:
+    serviceName: grafana
+    servicePort: 3000
+  access:
+    project: infrastructure   # Zitadel project name (resolved to ID automatically)
+    roles:
+      - admin
+      - viewer
+```
+
+The operator will:
+
+1. Look up the Zitadel project `infrastructure` and verify `admin` and `viewer` roles exist
+2. Create a Cloudflare Access Application for `grafana.example.com` with an allow policy that checks the Zitadel JWT role claim directly
+3. Create an Ingress with `ingressClassName: cloudflare-tunnel` pointing to the backend service
+
+Delete the CR and everything is cleaned up (Access Application via finalizer, Ingress via owner reference).
+
+## Installation
+
+### Helm
+
+```bash
+helm install zitadel-access-operator ./charts/zitadel-access-operator \
+  --namespace zitadel-access-operator \
+  --create-namespace \
+  --set zitadel.url=https://auth.example.com \
+  --set zitadel.token=<ZITADEL_PAT> \
+  --set cloudflare.apiToken=<CF_API_TOKEN> \
+  --set cloudflare.accountId=<CF_ACCOUNT_ID> \
+  --set cloudflare.idpId=<CF_IDP_ID>
+```
+
+Or use an existing secret:
+
+```bash
+helm install zitadel-access-operator ./charts/zitadel-access-operator \
+  --set existingSecret=my-credentials \
+  --set zitadel.url=https://auth.example.com \
+  --set cloudflare.accountId=<CF_ACCOUNT_ID> \
+  --set cloudflare.idpId=<CF_IDP_ID>
+```
+
+The secret must contain keys `zitadel-token` and `cloudflare-api-token`.
+
+## Configuration
+
+| Flag | Env | Default | Description |
+|------|-----|---------|-------------|
+| `--zitadel-url` | `ZITADEL_URL` | — | Zitadel instance URL |
+| `--zitadel-token` | `ZITADEL_TOKEN` | — | Zitadel PAT |
+| `--cloudflare-api-token` | `CLOUDFLARE_API_TOKEN` | — | Cloudflare API token |
+| `--cloudflare-account-id` | `CLOUDFLARE_ACCOUNT_ID` | — | Cloudflare account ID |
+| `--cloudflare-idp-id` | `CLOUDFLARE_IDP_ID` | — | CF Access Identity Provider ID for Zitadel |
+| `--default-ingress-class` | — | `cloudflare-tunnel` | Ingress class for generated Ingresses |
+| `--session-duration` | — | `24h` | CF Access session duration |
+| `--leader-elect` | — | `false` | Enable leader election |
+
+## Development
+
+```bash
+# Build
+just build
+
+# Run tests
+just test
+
+# Generate deepcopy & CRD manifests
+just generate
+just manifests
+
+# Docker
+just docker-build
+just docker-push
+```
+
+## License
+
+MIT
