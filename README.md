@@ -27,45 +27,77 @@ SecuredApplication CR
         │    └─ Creates Access Application with policy checking custom:roles claim
         │
         └─ Kubernetes
-             └─ Creates Ingress for Cloudflare Tunnel routing
+             ├─ Creates Cloudflare Tunnel Ingress (always)
+             └─ Creates direct OIDC Ingress (when nativeOIDC.ingress is set)
 ```
 
-When a user hits the protected domain, Cloudflare Access redirects them to Zitadel for authentication. The resulting JWT contains the `custom:roles` claim (a flat array of role names). The Access policy checks this claim against the allowed roles. The backend receives the authenticated request via the Cloudflare Tunnel.
+### Two access paths
+
+Every `SecuredApplication` always gets:
+- A **Zitadel OIDC application** (registered for visibility and credential management)
+- A **Cloudflare Access Application** with a policy that checks the `custom:roles` JWT claim
+- A **Cloudflare Tunnel Ingress** where Cloudflare Access enforces role-based authorization at the edge
+
+Optionally, with `nativeOIDC.ingress`, the operator creates a second Ingress on a different hostname (e.g. `grafana-internal.example.com`) that **bypasses Cloudflare Access entirely**. On this path, the app handles OIDC authentication directly against Zitadel using its own client credentials.
+
+```
+External user → grafana.example.com
+  → CF Tunnel Ingress → CF Access checks custom:roles → backend
+
+Internal user → grafana-internal.example.com
+  → Direct Ingress → app authenticates via Zitadel OIDC natively → backend
+```
 
 ## Custom Resource
+
+### Basic (CF Access protection only)
+
+```yaml
+apiVersion: access.zitadel.com/v1alpha1
+kind: SecuredApplication
+metadata:
+  name: wiki
+spec:
+  host: wiki.example.com
+  access:
+    project: infrastructure
+    roles: [admin]
+  backend:
+    serviceName: wiki
+    servicePort: 8080
+```
+
+The backend doesn't need to know about OIDC — Cloudflare Access handles everything at the edge. The OIDC app is still registered in Zitadel, and credentials are written to the Secret `wiki-oidc`.
+
+### With native OIDC (e.g. Grafana)
 
 ```yaml
 apiVersion: access.zitadel.com/v1alpha1
 kind: SecuredApplication
 metadata:
   name: grafana
-  namespace: monitoring
 spec:
   host: grafana.example.com
   access:
-    project: infrastructure   # Zitadel project name (resolved to ID)
-    roles:
-      - admin
-      - viewer
+    project: infrastructure
+    roles: [admin, viewer]
   backend:
     serviceName: grafana
     servicePort: 3000
-  oidc:                        # optional overrides for the Zitadel OIDC app
+  nativeOIDC:
     redirectURIs:
-      - https://grafana.example.com/login/generic_oauth
+      - https://grafana-internal.example.com/login/generic_oauth
     idTokenRoleAssertion: true
     accessTokenRoleAssertion: true
-  deleteProtection: true       # keep external resources on CR deletion
+    ingress:
+      host: grafana-internal.example.com
+      className: nginx
+  deleteProtection: true
 ```
 
-The operator will:
-
-1. Look up the Zitadel project `infrastructure` and verify `admin` and `viewer` roles exist
-2. Create a Zitadel OIDC application and write client credentials to a Kubernetes Secret (`grafana-oidc` by default, configurable via `oidc.clientSecretRef`)
-3. Create a Cloudflare Access Application for `grafana.example.com` with a policy that checks the `custom:roles` claim
-4. Create an Ingress with `ingressClassName: cloudflare-tunnel` (overridable via `ingress.className`)
-
-The `oidc` section is optional — omit it to use sensible defaults. The OIDC application is always created in Zitadel regardless.
+This creates two Ingresses:
+- `grafana.example.com` via Cloudflare Tunnel (CF Access enforces roles)
+- `grafana-internal.example.com` via nginx (Grafana authenticates users directly against Zitadel)
 
 ### Delete protection
 

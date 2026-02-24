@@ -1,4 +1,20 @@
-# Full — with custom OIDC settings for Grafana
+# Minimal — CF Access protection + Zitadel app registration
+apiVersion: access.zitadel.com/v1alpha1
+kind: SecuredApplication
+metadata:
+  name: wiki
+  namespace: default
+spec:
+  host: wiki.example.com
+  access:
+    project: infrastructure
+    roles:
+      - admin
+  backend:
+    serviceName: wiki
+    servicePort: 8080
+---
+# Native OIDC — app handles its own OAuth (e.g. Grafana) with a direct Ingress
 apiVersion: access.zitadel.com/v1alpha1
 kind: SecuredApplication
 metadata:
@@ -14,25 +30,13 @@ spec:
   backend:
     serviceName: grafana
     servicePort: 3000
-  oidc:
+  nativeOIDC:
     redirectURIs:
-      - https://grafana.example.com/login/generic_oauth
+      - https://grafana-internal.example.com/login/generic_oauth
     idTokenRoleAssertion: true
     accessTokenRoleAssertion: true
+    clientSecretRef: grafana-oidc
+    ingress:
+      host: grafana-internal.example.com
+      className: nginx
   deleteProtection: true
----
-# Minimal — defaults for everything
-apiVersion: access.zitadel.com/v1alpha1
-kind: SecuredApplication
-metadata:
-  name: wiki
-  namespace: default
-spec:
-  host: wiki.example.com
-  access:
-    project: infrastructure
-    roles:
-      - admin
-  backend:
-    serviceName: wiki
-    servicePort: 8080

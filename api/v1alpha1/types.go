@@ -33,10 +33,22 @@ type SecuredApplicationSpec struct {
 	// Backend defines the Kubernetes Service to route traffic to.
 	Backend Backend `json:"backend"`
 
-	// OIDC allows overriding defaults for the Zitadel OIDC application.
-	// The OIDC app is always created; this section customizes it.
+	// NativeOIDC customizes the Zitadel OIDC application and optionally
+	// creates a second Ingress for native OIDC access.
+	//
+	// Every SecuredApplication gets a Zitadel OIDC app (for registration)
+	// and a Cloudflare Tunnel Ingress (with CF Access enforcing roles at
+	// the edge). The nativeOIDC section is for apps like Grafana that also
+	// handle OIDC authentication themselves — it lets you customize the
+	// Zitadel app settings (redirect URIs, token assertions) and optionally
+	// expose a second Ingress where the app authenticates users directly
+	// against Zitadel, bypassing Cloudflare Access.
+	//
+	// Two access paths:
+	//   spec.host → CF Tunnel Ingress → CF Access enforces custom:roles → backend
+	//   nativeOIDC.ingress.host → direct Ingress → app does its own OIDC with Zitadel
 	// +optional
-	OIDC *OIDCConfig `json:"oidc,omitempty"`
+	NativeOIDC *NativeOIDCConfig `json:"nativeOIDC,omitempty"`
 
 	// Ingress allows overriding generated Ingress settings.
 	// +optional
@@ -70,7 +82,7 @@ type Backend struct {
 	Protocol string `json:"protocol,omitempty"`
 }
 
-type OIDCConfig struct {
+type NativeOIDCConfig struct {
 	// RedirectURIs for the OIDC application.
 	// Defaults to ["https://{host}/callback"] if not specified.
 	// +optional
@@ -121,6 +133,32 @@ type OIDCConfig struct {
 	// "clientId" and "clientSecret" keys.
 	// +optional
 	ClientSecretRef string `json:"clientSecretRef,omitempty"`
+
+	// Ingress creates a second Ingress that bypasses Cloudflare Access,
+	// allowing the app to handle authentication directly via its Zitadel
+	// OIDC credentials. Requires a host different from spec.host.
+	// +optional
+	Ingress *OIDCIngressConfig `json:"ingress,omitempty"`
+}
+
+type OIDCIngressConfig struct {
+	// Host is the hostname for direct OIDC access (e.g. "grafana-internal.example.com").
+	Host string `json:"host"`
+
+	// ClassName for the direct Ingress (e.g. "nginx"). No default.
+	ClassName string `json:"className"`
+
+	// Annotations to add to the generated Ingress.
+	// +optional
+	Annotations map[string]string `json:"annotations,omitempty"`
+
+	// Path defaults to "/".
+	// +optional
+	Path string `json:"path,omitempty"`
+
+	// PathType defaults to "Prefix".
+	// +optional
+	PathType string `json:"pathType,omitempty"`
 }
 
 type IngressConfig struct {

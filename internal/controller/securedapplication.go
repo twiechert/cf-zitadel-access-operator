@@ -183,13 +183,21 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return r.setCondition(ctx, &app, metav1.ConditionFalse, "PolicyFailed", err.Error())
 	}
 
-	// 5. Reconcile Ingress.
+	// 5. Reconcile Cloudflare Tunnel Ingress.
 	if err := r.reconcileIngress(ctx, &app); err != nil {
 		return r.setCondition(ctx, &app, metav1.ConditionFalse, "IngressFailed", err.Error())
 	}
-	logger.Info("reconciled ingress", "name", app.Name)
+	logger.Info("reconciled tunnel ingress", "name", app.Name)
 
-	// 6. Update status.
+	// 6. Reconcile direct OIDC Ingress (bypasses CF Access, app handles auth).
+	if app.Spec.NativeOIDC != nil && app.Spec.NativeOIDC.Ingress != nil {
+		if err := r.reconcileOIDCIngress(ctx, &app); err != nil {
+			return r.setCondition(ctx, &app, metav1.ConditionFalse, "OIDCIngressFailed", err.Error())
+		}
+		logger.Info("reconciled OIDC ingress", "name", app.Name+"-oidc")
+	}
+
+	// 7. Update status.
 	app.Status.ProjectID = project.ID
 	app.Status.ZitadelAppID = oidcApp.ID
 	app.Status.ClientID = oidcApp.ClientID
@@ -211,30 +219,30 @@ func (r *SecuredApplicationReconciler) reconcileZitadelApp(ctx context.Context, 
 		AccessTokenType: "OIDC_TOKEN_TYPE_BEARER",
 	}
 
-	if app.Spec.OIDC != nil {
-		if len(app.Spec.OIDC.RedirectURIs) > 0 {
-			config.RedirectURIs = app.Spec.OIDC.RedirectURIs
+	if app.Spec.NativeOIDC != nil {
+		if len(app.Spec.NativeOIDC.RedirectURIs) > 0 {
+			config.RedirectURIs = app.Spec.NativeOIDC.RedirectURIs
 		}
-		config.PostLogoutRedirectURIs = app.Spec.OIDC.PostLogoutRedirectURIs
-		if len(app.Spec.OIDC.ResponseTypes) > 0 {
-			config.ResponseTypes = app.Spec.OIDC.ResponseTypes
+		config.PostLogoutRedirectURIs = app.Spec.NativeOIDC.PostLogoutRedirectURIs
+		if len(app.Spec.NativeOIDC.ResponseTypes) > 0 {
+			config.ResponseTypes = app.Spec.NativeOIDC.ResponseTypes
 		}
-		if len(app.Spec.OIDC.GrantTypes) > 0 {
-			config.GrantTypes = app.Spec.OIDC.GrantTypes
+		if len(app.Spec.NativeOIDC.GrantTypes) > 0 {
+			config.GrantTypes = app.Spec.NativeOIDC.GrantTypes
 		}
-		if app.Spec.OIDC.AppType != "" {
-			config.AppType = app.Spec.OIDC.AppType
+		if app.Spec.NativeOIDC.AppType != "" {
+			config.AppType = app.Spec.NativeOIDC.AppType
 		}
-		if app.Spec.OIDC.AuthMethodType != "" {
-			config.AuthMethodType = app.Spec.OIDC.AuthMethodType
+		if app.Spec.NativeOIDC.AuthMethodType != "" {
+			config.AuthMethodType = app.Spec.NativeOIDC.AuthMethodType
 		}
-		if app.Spec.OIDC.AccessTokenType != "" {
-			config.AccessTokenType = app.Spec.OIDC.AccessTokenType
+		if app.Spec.NativeOIDC.AccessTokenType != "" {
+			config.AccessTokenType = app.Spec.NativeOIDC.AccessTokenType
 		}
-		config.DevMode = app.Spec.OIDC.DevMode
-		config.IDTokenRoleAssertion = app.Spec.OIDC.IDTokenRoleAssertion
-		config.IDTokenUserinfoAssertion = app.Spec.OIDC.IDTokenUserinfoAssertion
-		config.AccessTokenRoleAssertion = app.Spec.OIDC.AccessTokenRoleAssertion
+		config.DevMode = app.Spec.NativeOIDC.DevMode
+		config.IDTokenRoleAssertion = app.Spec.NativeOIDC.IDTokenRoleAssertion
+		config.IDTokenUserinfoAssertion = app.Spec.NativeOIDC.IDTokenUserinfoAssertion
+		config.AccessTokenRoleAssertion = app.Spec.NativeOIDC.AccessTokenRoleAssertion
 	}
 
 	// Update existing app.
@@ -270,8 +278,8 @@ func (r *SecuredApplicationReconciler) reconcileZitadelApp(ctx context.Context, 
 
 func (r *SecuredApplicationReconciler) writeCredentialSecret(ctx context.Context, app *accessv1alpha1.SecuredApplication, clientID, clientSecret string) error {
 	secretName := app.Name + "-oidc"
-	if app.Spec.OIDC != nil && app.Spec.OIDC.ClientSecretRef != "" {
-		secretName = app.Spec.OIDC.ClientSecretRef
+	if app.Spec.NativeOIDC != nil && app.Spec.NativeOIDC.ClientSecretRef != "" {
+		secretName = app.Spec.NativeOIDC.ClientSecretRef
 	}
 
 	secret := &corev1.Secret{
@@ -336,6 +344,68 @@ func (r *SecuredApplicationReconciler) reconcileIngress(ctx context.Context, app
 		ingress.Spec.Rules = []networkingv1.IngressRule{
 			{
 				Host: app.Spec.Host,
+				IngressRuleValue: networkingv1.IngressRuleValue{
+					HTTP: &networkingv1.HTTPIngressRuleValue{
+						Paths: []networkingv1.HTTPIngressPath{
+							{
+								Path:     path,
+								PathType: &pathType,
+								Backend: networkingv1.IngressBackend{
+									Service: &networkingv1.IngressServiceBackend{
+										Name: app.Spec.Backend.ServiceName,
+										Port: networkingv1.ServiceBackendPort{
+											Number: app.Spec.Backend.ServicePort,
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		return nil
+	})
+
+	return err
+}
+
+func (r *SecuredApplicationReconciler) reconcileOIDCIngress(ctx context.Context, app *accessv1alpha1.SecuredApplication) error {
+	oidcIngress := app.Spec.NativeOIDC.Ingress
+
+	ingress := &networkingv1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      app.Name + "-oidc",
+			Namespace: app.Namespace,
+		},
+	}
+
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, ingress, func() error {
+		if err := controllerutil.SetControllerReference(app, ingress, r.Scheme); err != nil {
+			return err
+		}
+
+		ingress.Spec.IngressClassName = &oidcIngress.ClassName
+
+		annotations := make(map[string]string)
+		for k, v := range oidcIngress.Annotations {
+			annotations[k] = v
+		}
+		ingress.Annotations = annotations
+
+		pathType := networkingv1.PathTypePrefix
+		if oidcIngress.PathType != "" {
+			pathType = networkingv1.PathType(oidcIngress.PathType)
+		}
+		path := "/"
+		if oidcIngress.Path != "" {
+			path = oidcIngress.Path
+		}
+
+		ingress.Spec.Rules = []networkingv1.IngressRule{
+			{
+				Host: oidcIngress.Host,
 				IngressRuleValue: networkingv1.IngressRuleValue{
 					HTTP: &networkingv1.HTTPIngressRuleValue{
 						Paths: []networkingv1.HTTPIngressPath{

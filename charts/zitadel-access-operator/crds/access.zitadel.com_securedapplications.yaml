@@ -122,10 +122,22 @@ spec:
                     description: PathType defaults to "Prefix".
                     type: string
                 type: object
-              oidc:
+              nativeOIDC:
                 description: |-
-                  OIDC allows overriding defaults for the Zitadel OIDC application.
-                  The OIDC app is always created; this section customizes it.
+                  NativeOIDC customizes the Zitadel OIDC application and optionally
+                  creates a second Ingress for native OIDC access.
+
+                  Every SecuredApplication gets a Zitadel OIDC app (for registration)
+                  and a Cloudflare Tunnel Ingress (with CF Access enforcing roles at
+                  the edge). The nativeOIDC section is for apps like Grafana that also
+                  handle OIDC authentication themselves — it lets you customize the
+                  Zitadel app settings (redirect URIs, token assertions) and optionally
+                  expose a second Ingress where the app authenticates users directly
+                  against Zitadel, bypassing Cloudflare Access.
+
+                  Two access paths:
+                    spec.host → CF Tunnel Ingress → CF Access enforces custom:roles → backend
+                    nativeOIDC.ingress.host → direct Ingress → app does its own OIDC with Zitadel
                 properties:
                   accessTokenRoleAssertion:
                     description: AccessTokenRoleAssertion includes roles in the access
@@ -162,6 +174,35 @@ spec:
                     description: IDTokenUserinfoAssertion includes userinfo in the
                       ID token.
                     type: boolean
+                  ingress:
+                    description: |-
+                      Ingress creates a second Ingress that bypasses Cloudflare Access,
+                      allowing the app to handle authentication directly via its Zitadel
+                      OIDC credentials. Requires a host different from spec.host.
+                    properties:
+                      annotations:
+                        additionalProperties:
+                          type: string
+                        description: Annotations to add to the generated Ingress.
+                        type: object
+                      className:
+                        description: ClassName for the direct Ingress (e.g. "nginx").
+                          No default.
+                        type: string
+                      host:
+                        description: Host is the hostname for direct OIDC access (e.g.
+                          "grafana-internal.example.com").
+                        type: string
+                      path:
+                        description: Path defaults to "/".
+                        type: string
+                      pathType:
+                        description: PathType defaults to "Prefix".
+                        type: string
+                    required:
+                    - className
+                    - host
+                    type: object
                   postLogoutRedirectURIs:
                     description: PostLogoutRedirectURIs for the OIDC application.
                     items:
