@@ -27,7 +27,6 @@ cloudflare:
 
 # Operator behaviour
 config:
-  defaultIngressClass: cloudflare-tunnel
   sessionDuration: "24h"
   leaderElect: false
 

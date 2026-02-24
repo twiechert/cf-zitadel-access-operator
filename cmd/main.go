@@ -34,7 +34,6 @@ func main() {
 		cfAPIToken           string
 		cfAccountID          string
 		cfIdPID              string
-		defaultIngressClass  string
 		sessionDuration      string
 	)
 
@@ -46,7 +45,6 @@ func main() {
 	flag.StringVar(&cfAPIToken, "cloudflare-api-token", os.Getenv("CLOUDFLARE_API_TOKEN"), "Cloudflare API token.")
 	flag.StringVar(&cfAccountID, "cloudflare-account-id", os.Getenv("CLOUDFLARE_ACCOUNT_ID"), "Cloudflare account ID.")
 	flag.StringVar(&cfIdPID, "cloudflare-idp-id", os.Getenv("CLOUDFLARE_IDP_ID"), "Cloudflare Access Identity Provider ID for Zitadel.")
-	flag.StringVar(&defaultIngressClass, "default-ingress-class", "cloudflare-tunnel", "Default Ingress class for generated Ingresses.")
 	flag.StringVar(&sessionDuration, "session-duration", "24h", "Cloudflare Access session duration.")
 
 	opts := zap.Options{Development: true}
@@ -82,9 +80,8 @@ func main() {
 		Zitadel:    zitadel.NewClient(zitadelURL, zitadelToken),
 		Cloudflare: cfclient.NewClient(cfAPIToken, cfAccountID),
 		Config: controller.Config{
-			DefaultIngressClass: defaultIngressClass,
-			CloudflareIdPID:     cfIdPID,
-			SessionDuration:     sessionDuration,
+			CloudflareIdPID: cfIdPID,
+			SessionDuration: sessionDuration,
 		},
 	}
 	if err := reconciler.SetupWithManager(mgr); err != nil {

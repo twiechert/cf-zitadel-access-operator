@@ -31,21 +31,24 @@ metadata:
   namespace: monitoring
 spec:
   host: grafana.example.com
-  backend:
-    serviceName: grafana
-    servicePort: 3000
   access:
     project: infrastructure   # Zitadel project name (resolved to ID automatically)
     roles:
       - admin
       - viewer
+  tunnel:                      # optional — creates Ingress for CF tunnel routing
+    backend:
+      serviceName: grafana
+      servicePort: 3000
 ```
 
 The operator will:
 
 1. Look up the Zitadel project `infrastructure` and verify `admin` and `viewer` roles exist
 2. Create a Cloudflare Access Application for `grafana.example.com` with an allow policy that checks the Zitadel JWT role claim directly
-3. Create an Ingress with `ingressClassName: cloudflare-tunnel` pointing to the backend service
+3. If `tunnel` is set, create an Ingress with `ingressClassName: cloudflare-tunnel` pointing to the backend service
+
+Omit `tunnel` to only create the Access Application (useful when the service is already exposed via another ingress).
 
 Delete the CR and everything is cleaned up (Access Application via finalizer, Ingress via owner reference).
 
@@ -85,7 +88,6 @@ The secret must contain keys `zitadel-token` and `cloudflare-api-token`.
 | `--cloudflare-api-token` | `CLOUDFLARE_API_TOKEN` | — | Cloudflare API token |
 | `--cloudflare-account-id` | `CLOUDFLARE_ACCOUNT_ID` | — | Cloudflare account ID |
 | `--cloudflare-idp-id` | `CLOUDFLARE_IDP_ID` | — | CF Access Identity Provider ID for Zitadel |
-| `--default-ingress-class` | — | `cloudflare-tunnel` | Ingress class for generated Ingresses |
 | `--session-duration` | — | `24h` | CF Access session duration |
 | `--leader-elect` | — | `false` | Enable leader election |
 

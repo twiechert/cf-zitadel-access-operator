@@ -5,11 +5,25 @@ metadata:
   namespace: monitoring
 spec:
   host: grafana.twiechert.de
-  backend:
-    serviceName: grafana
-    servicePort: 3000
   access:
     project: infrastructure
     roles:
       - admin
       - viewer
+  tunnel:
+    backend:
+      serviceName: grafana
+      servicePort: 3000
+---
+# Access-only (no tunnel) — service already exposed via another ingress
+apiVersion: access.zitadel.com/v1alpha1
+kind: SecuredApplication
+metadata:
+  name: proxmox
+  namespace: infrastructure
+spec:
+  host: proxmox.twiechert.de
+  access:
+    project: infrastructure
+    roles:
+      - admin

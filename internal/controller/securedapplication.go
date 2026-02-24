@@ -28,9 +28,6 @@ const (
 
 // Config holds operator-level configuration.
 type Config struct {
-	// DefaultIngressClass is the Ingress class for generated Ingresses.
-	DefaultIngressClass string
-
 	// CloudflareIdPID is the Cloudflare Access Identity Provider ID for Zitadel.
 	CloudflareIdPID string
 
@@ -73,7 +70,7 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 					return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 				}
 			}
-			// Ingress is cleaned up via ownerReference GC.
+			// Ingress (if any) is cleaned up via ownerReference GC.
 			controllerutil.RemoveFinalizer(&app, finalizerName)
 			if err := r.Update(ctx, &app); err != nil {
 				return ctrl.Result{}, err
@@ -121,7 +118,6 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 	accessAppID := app.Status.AccessApplicationID
 	if accessAppID == "" {
-		// Check if one already exists for this domain.
 		existing, err := r.Cloudflare.FindAccessAppByDomain(ctx, app.Spec.Host)
 		if err != nil {
 			return r.setCondition(ctx, &app, metav1.ConditionFalse, "CloudflareLookupFailed", err.Error())
@@ -145,7 +141,6 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		logger.Info("created Access Application", "appId", accessAppID)
 	}
 
-	// Build OIDC claim rules — one per role, OR'd together by Cloudflare.
 	rules := make([]cfclient.OIDCClaimRule, len(app.Spec.Access.Roles))
 	for i, role := range app.Spec.Access.Roles {
 		rules[i] = cfclient.OIDCClaimRule{
@@ -160,7 +155,33 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return r.setCondition(ctx, &app, metav1.ConditionFalse, "PolicyFailed", err.Error())
 	}
 
-	// 4. Reconcile Ingress (for CF tunnel routing only — no access annotations).
+	// 4. Reconcile Ingress if tunnel is configured.
+	tunnelCreated := false
+	if app.Spec.Tunnel != nil {
+		if err := r.reconcileIngress(ctx, &app); err != nil {
+			return r.setCondition(ctx, &app, metav1.ConditionFalse, "IngressFailed", err.Error())
+		}
+		tunnelCreated = true
+		logger.Info("reconciled ingress", "name", app.Name)
+	}
+
+	// 5. Update status.
+	app.Status.ProjectID = project.ID
+	app.Status.AccessApplicationID = accessAppID
+	app.Status.AccessPolicyID = policy.ID
+	app.Status.TunnelCreated = tunnelCreated
+	app.Status.Ready = true
+
+	msg := "Access Application is up to date"
+	if tunnelCreated {
+		msg = "Access Application and Ingress are up to date"
+	}
+	return r.setCondition(ctx, &app, metav1.ConditionTrue, "Reconciled", msg)
+}
+
+func (r *SecuredApplicationReconciler) reconcileIngress(ctx context.Context, app *accessv1alpha1.SecuredApplication) error {
+	tunnel := app.Spec.Tunnel
+
 	ingress := &networkingv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      app.Name,
@@ -168,36 +189,35 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		},
 	}
 
-	ingressResult, err := controllerutil.CreateOrUpdate(ctx, r.Client, ingress, func() error {
-		if err := controllerutil.SetControllerReference(&app, ingress, r.Scheme); err != nil {
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, ingress, func() error {
+		if err := controllerutil.SetControllerReference(app, ingress, r.Scheme); err != nil {
 			return err
 		}
 
-		className := r.Config.DefaultIngressClass
-		if app.Spec.Ingress != nil && app.Spec.Ingress.ClassName != "" {
-			className = app.Spec.Ingress.ClassName
+		className := "cloudflare-tunnel"
+		if tunnel.Ingress != nil && tunnel.Ingress.ClassName != "" {
+			className = tunnel.Ingress.ClassName
 		}
 		ingress.Spec.IngressClassName = &className
 
-		// Only user-specified annotations + backend protocol if needed.
 		annotations := make(map[string]string)
-		if app.Spec.Ingress != nil {
-			for k, v := range app.Spec.Ingress.Annotations {
+		if tunnel.Ingress != nil {
+			for k, v := range tunnel.Ingress.Annotations {
 				annotations[k] = v
 			}
 		}
-		if app.Spec.Backend.Protocol != "" {
-			annotations[cfBackendProtocolAnnotation] = app.Spec.Backend.Protocol
+		if tunnel.Backend.Protocol != "" {
+			annotations[cfBackendProtocolAnnotation] = tunnel.Backend.Protocol
 		}
 		ingress.Annotations = annotations
 
 		pathType := networkingv1.PathTypePrefix
-		if app.Spec.Ingress != nil && app.Spec.Ingress.PathType != "" {
-			pathType = networkingv1.PathType(app.Spec.Ingress.PathType)
+		if tunnel.Ingress != nil && tunnel.Ingress.PathType != "" {
+			pathType = networkingv1.PathType(tunnel.Ingress.PathType)
 		}
 		path := "/"
-		if app.Spec.Ingress != nil && app.Spec.Ingress.Path != "" {
-			path = app.Spec.Ingress.Path
+		if tunnel.Ingress != nil && tunnel.Ingress.Path != "" {
+			path = tunnel.Ingress.Path
 		}
 
 		ingress.Spec.Rules = []networkingv1.IngressRule{
@@ -211,9 +231,9 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 								PathType: &pathType,
 								Backend: networkingv1.IngressBackend{
 									Service: &networkingv1.IngressServiceBackend{
-										Name: app.Spec.Backend.ServiceName,
+										Name: tunnel.Backend.ServiceName,
 										Port: networkingv1.ServiceBackendPort{
-											Number: app.Spec.Backend.ServicePort,
+											Number: tunnel.Backend.ServicePort,
 										},
 									},
 								},
@@ -226,18 +246,8 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 		return nil
 	})
-	if err != nil {
-		return r.setCondition(ctx, &app, metav1.ConditionFalse, "IngressFailed", err.Error())
-	}
 
-	logger.Info("reconciled ingress", "name", ingress.Name, "operation", ingressResult)
-
-	// 5. Update status.
-	app.Status.ProjectID = project.ID
-	app.Status.AccessApplicationID = accessAppID
-	app.Status.AccessPolicyID = policy.ID
-	app.Status.Ready = true
-	return r.setCondition(ctx, &app, metav1.ConditionTrue, "Reconciled", "Access Application and Ingress are up to date")
+	return err
 }
 
 func (r *SecuredApplicationReconciler) setCondition(ctx context.Context, app *accessv1alpha1.SecuredApplication, status metav1.ConditionStatus, reason, message string) (ctrl.Result, error) {

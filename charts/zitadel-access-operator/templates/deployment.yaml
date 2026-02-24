@@ -24,7 +24,6 @@ spec:
             - --zitadel-url={{ .Values.zitadel.url }}
             - --cloudflare-account-id={{ .Values.cloudflare.accountId }}
             - --cloudflare-idp-id={{ .Values.cloudflare.idpId }}
-            - --default-ingress-class={{ .Values.config.defaultIngressClass }}
             - --session-duration={{ .Values.config.sessionDuration }}
             - --metrics-bind-address=:8080
             - --health-probe-bind-address=:8081

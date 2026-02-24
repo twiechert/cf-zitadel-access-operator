@@ -8,12 +8,13 @@ import (
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Host",type=string,JSONPath=`.spec.host`
 // +kubebuilder:printcolumn:name="Project",type=string,JSONPath=`.spec.access.project`
+// +kubebuilder:printcolumn:name="Tunnel",type=boolean,JSONPath=`.status.tunnelCreated`
 // +kubebuilder:printcolumn:name="Ready",type=boolean,JSONPath=`.status.ready`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// SecuredApplication declares a Kubernetes service that should be exposed
-// via an Ingress and protected with Zitadel role-based access through
-// Cloudflare Access.
+// SecuredApplication declares a service protected with Zitadel role-based
+// access through Cloudflare Access. Optionally creates a Cloudflare Tunnel
+// Ingress for routing.
 type SecuredApplication struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -26,11 +27,27 @@ type SecuredApplicationSpec struct {
 	// Host is the public hostname for this application.
 	Host string `json:"host"`
 
-	// Backend defines the Kubernetes Service to route traffic to.
-	Backend Backend `json:"backend"`
-
 	// Access defines the Zitadel project and roles required to access this application.
 	Access Access `json:"access"`
+
+	// Tunnel creates a Cloudflare Tunnel Ingress for routing.
+	// When omitted, only the Cloudflare Access Application is created.
+	// +optional
+	Tunnel *TunnelConfig `json:"tunnel,omitempty"`
+}
+
+type Access struct {
+	// Project is the Zitadel project name. The operator resolves this to a project ID.
+	Project string `json:"project"`
+
+	// Roles lists the Zitadel project roles allowed to access this application.
+	// +kubebuilder:validation:MinItems=1
+	Roles []string `json:"roles"`
+}
+
+type TunnelConfig struct {
+	// Backend defines the Kubernetes Service to route traffic to.
+	Backend Backend `json:"backend"`
 
 	// Ingress allows overriding generated Ingress settings.
 	// +optional
@@ -47,15 +64,6 @@ type Backend struct {
 	// Protocol overrides the backend protocol (e.g. "https").
 	// +optional
 	Protocol string `json:"protocol,omitempty"`
-}
-
-type Access struct {
-	// Project is the Zitadel project name. The operator resolves this to a project ID.
-	Project string `json:"project"`
-
-	// Roles lists the Zitadel project roles allowed to access this application.
-	// +kubebuilder:validation:MinItems=1
-	Roles []string `json:"roles"`
 }
 
 type IngressConfig struct {
@@ -85,6 +93,9 @@ type SecuredApplicationStatus struct {
 
 	// AccessPolicyID is the Cloudflare Access Policy ID.
 	AccessPolicyID string `json:"accessPolicyId,omitempty"`
+
+	// TunnelCreated indicates an Ingress was created for tunnel routing.
+	TunnelCreated bool `json:"tunnelCreated"`
 
 	// Ready indicates the application is fully reconciled.
 	Ready bool `json:"ready"`

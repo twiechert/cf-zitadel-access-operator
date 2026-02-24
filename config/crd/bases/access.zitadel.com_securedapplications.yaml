@@ -21,6 +21,9 @@ spec:
     - jsonPath: .spec.access.project
       name: Project
       type: string
+    - jsonPath: .status.tunnelCreated
+      name: Tunnel
+      type: boolean
     - jsonPath: .status.ready
       name: Ready
       type: boolean
@@ -31,9 +34,9 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          SecuredApplication declares a Kubernetes service that should be exposed
-          via an Ingress and protected with Zitadel role-based access through
-          Cloudflare Access.
+          SecuredApplication declares a service protected with Zitadel role-based
+          access through Cloudflare Access. Optionally creates a Cloudflare Tunnel
+          Ingress for routing.
         properties:
           apiVersion:
             description: |-
@@ -73,48 +76,56 @@ spec:
                 - project
                 - roles
                 type: object
-              backend:
-                description: Backend defines the Kubernetes Service to route traffic
-                  to.
-                properties:
-                  protocol:
-                    description: Protocol overrides the backend protocol (e.g. "https").
-                    type: string
-                  serviceName:
-                    description: ServiceName is the name of the Kubernetes Service.
-                    type: string
-                  servicePort:
-                    description: ServicePort is the port number on the Service.
-                    format: int32
-                    type: integer
-                required:
-                - serviceName
-                - servicePort
-                type: object
               host:
                 description: Host is the public hostname for this application.
                 type: string
-              ingress:
-                description: Ingress allows overriding generated Ingress settings.
+              tunnel:
+                description: |-
+                  Tunnel creates a Cloudflare Tunnel Ingress for routing.
+                  When omitted, only the Cloudflare Access Application is created.
                 properties:
-                  annotations:
-                    additionalProperties:
-                      type: string
-                    description: Annotations to add to the generated Ingress.
+                  backend:
+                    description: Backend defines the Kubernetes Service to route traffic
+                      to.
+                    properties:
+                      protocol:
+                        description: Protocol overrides the backend protocol (e.g.
+                          "https").
+                        type: string
+                      serviceName:
+                        description: ServiceName is the name of the Kubernetes Service.
+                        type: string
+                      servicePort:
+                        description: ServicePort is the port number on the Service.
+                        format: int32
+                        type: integer
+                    required:
+                    - serviceName
+                    - servicePort
                     type: object
-                  className:
-                    description: ClassName overrides the default Ingress class.
-                    type: string
-                  path:
-                    description: Path defaults to "/".
-                    type: string
-                  pathType:
-                    description: PathType defaults to "Prefix".
-                    type: string
+                  ingress:
+                    description: Ingress allows overriding generated Ingress settings.
+                    properties:
+                      annotations:
+                        additionalProperties:
+                          type: string
+                        description: Annotations to add to the generated Ingress.
+                        type: object
+                      className:
+                        description: ClassName overrides the default Ingress class.
+                        type: string
+                      path:
+                        description: Path defaults to "/".
+                        type: string
+                      pathType:
+                        description: PathType defaults to "Prefix".
+                        type: string
+                    type: object
+                required:
+                - backend
                 type: object
             required:
             - access
-            - backend
             - host
             type: object
           status:
@@ -189,8 +200,13 @@ spec:
               ready:
                 description: Ready indicates the application is fully reconciled.
                 type: boolean
+              tunnelCreated:
+                description: TunnelCreated indicates an Ingress was created for tunnel
+                  routing.
+                type: boolean
             required:
             - ready
+            - tunnelCreated
             type: object
         type: object
     served: true
