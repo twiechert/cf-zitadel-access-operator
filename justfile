@@ -1,10 +1,10 @@
-img := "ghcr.io/twiechert/zitadel-access-operator:latest"
+img := "ghcr.io/twiechert/cf-zitadel-access-operator:latest"
 
 controller-gen := "go run sigs.k8s.io/controller-tools/cmd/controller-gen@latest"
 
 # Build the operator binary
 build: fmt vet
-    go build -o bin/zitadel-access-operator ./cmd/
+    go build -o bin/cf-zitadel-access-operator ./cmd/
 
 # Generate deepcopy methods
 generate:
@@ -13,7 +13,7 @@ generate:
 # Generate CRD and RBAC manifests
 manifests:
     {{ controller-gen }} crd paths="./api/..." output:crd:artifacts:config=config/crd/bases
-    {{ controller-gen }} rbac:roleName=zitadel-access-operator paths="./internal/controller/..." output:rbac:artifacts:config=config/rbac
+    {{ controller-gen }} rbac:roleName=cf-zitadel-access-operator paths="./internal/controller/..." output:rbac:artifacts:config=config/rbac
 
 # Format code
 fmt:

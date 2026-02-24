@@ -1,21 +1,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "zitadel-access-operator.fullname" . }}
+  name: {{ include "cf-zitadel-access-operator.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "zitadel-access-operator.labels" . | nindent 4 }}
+    {{- include "cf-zitadel-access-operator.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      {{- include "zitadel-access-operator.selectorLabels" . | nindent 6 }}
+      {{- include "cf-zitadel-access-operator.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "zitadel-access-operator.selectorLabels" . | nindent 8 }}
+        {{- include "cf-zitadel-access-operator.selectorLabels" . | nindent 8 }}
     spec:
-      serviceAccountName: {{ include "zitadel-access-operator.serviceAccountName" . }}
+      serviceAccountName: {{ include "cf-zitadel-access-operator.serviceAccountName" . }}
       containers:
         - name: operator
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
@@ -33,12 +33,12 @@ spec:
             - name: ZITADEL_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "zitadel-access-operator.secretName" . }}
+                  name: {{ include "cf-zitadel-access-operator.secretName" . }}
                   key: zitadel-token
             - name: CLOUDFLARE_API_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "zitadel-access-operator.secretName" . }}
+                  name: {{ include "cf-zitadel-access-operator.secretName" . }}
                   key: cloudflare-api-token
             - name: CLOUDFLARE_ACCOUNT_ID
               value: {{ .Values.cloudflare.accountId | quote }}

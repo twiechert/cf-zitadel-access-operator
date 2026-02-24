@@ -1,9 +1,9 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "zitadel-access-operator.fullname" . }}
+  name: {{ include "cf-zitadel-access-operator.fullname" . }}
   labels:
-    {{- include "zitadel-access-operator.labels" . | nindent 4 }}
+    {{- include "cf-zitadel-access-operator.labels" . | nindent 4 }}
 rules:
   - apiGroups:
       - access.zitadel.com

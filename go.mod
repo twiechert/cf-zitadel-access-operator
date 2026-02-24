@@ -1,4 +1,4 @@
-module github.com/twiechert/zitadel-access-operator
+module github.com/twiechert/cf-zitadel-access-operator
 
 go 1.25.0
 

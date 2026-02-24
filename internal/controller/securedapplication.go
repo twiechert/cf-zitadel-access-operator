@@ -16,9 +16,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	accessv1alpha1 "github.com/twiechert/zitadel-access-operator/api/v1alpha1"
-	cfclient "github.com/twiechert/zitadel-access-operator/internal/cloudflare"
-	"github.com/twiechert/zitadel-access-operator/internal/zitadel"
+	accessv1alpha1 "github.com/twiechert/cf-zitadel-access-operator/api/v1alpha1"
+	cfclient "github.com/twiechert/cf-zitadel-access-operator/internal/cloudflare"
+	"github.com/twiechert/cf-zitadel-access-operator/internal/zitadel"
 )
 
 const (

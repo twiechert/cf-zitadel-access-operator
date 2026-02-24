@@ -1,4 +1,4 @@
-# zitadel-access-operator
+# cf-zitadel-access-operator
 
 A Kubernetes operator that secures services by registering them as OIDC applications in [Zitadel](https://zitadel.com), protecting them with [Cloudflare Access](https://www.cloudflare.com/zero-trust/products/access/) policies, and routing traffic through a Cloudflare Tunnel Ingress.
 
@@ -17,7 +17,7 @@ From a single `SecuredApplication` CR, the operator provisions resources across 
 SecuredApplication CR
         │
         ▼
-  zitadel-access-operator
+  cf-zitadel-access-operator
         │
         ├─ Zitadel
         │    ├─ Validates project & roles exist
@@ -108,9 +108,9 @@ Set `deleteProtection: true` to keep external resources (Zitadel OIDC app, Cloud
 ### Helm
 
 ```bash
-helm install zitadel-access-operator \
-  oci://ghcr.io/twiechert/charts/zitadel-access-operator \
-  --namespace zitadel-access-operator \
+helm install cf-zitadel-access-operator \
+  oci://ghcr.io/twiechert/charts/cf-zitadel-access-operator \
+  --namespace cf-zitadel-access-operator \
   --create-namespace \
   --set zitadel.url=https://auth.example.com \
   --set zitadel.token=<ZITADEL_PAT> \
@@ -122,8 +122,8 @@ helm install zitadel-access-operator \
 Or use an existing secret:
 
 ```bash
-helm install zitadel-access-operator \
-  oci://ghcr.io/twiechert/charts/zitadel-access-operator \
+helm install cf-zitadel-access-operator \
+  oci://ghcr.io/twiechert/charts/cf-zitadel-access-operator \
   --set existingSecret=my-credentials \
   --set zitadel.url=https://auth.example.com \
   --set cloudflare.accountId=<CF_ACCOUNT_ID> \

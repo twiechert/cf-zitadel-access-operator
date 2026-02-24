@@ -11,10 +11,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	accessv1alpha1 "github.com/twiechert/zitadel-access-operator/api/v1alpha1"
-	cfclient "github.com/twiechert/zitadel-access-operator/internal/cloudflare"
-	"github.com/twiechert/zitadel-access-operator/internal/controller"
-	"github.com/twiechert/zitadel-access-operator/internal/zitadel"
+	accessv1alpha1 "github.com/twiechert/cf-zitadel-access-operator/api/v1alpha1"
+	cfclient "github.com/twiechert/cf-zitadel-access-operator/internal/cloudflare"
+	"github.com/twiechert/cf-zitadel-access-operator/internal/controller"
+	"github.com/twiechert/cf-zitadel-access-operator/internal/zitadel"
 )
 
 var scheme = runtime.NewScheme()
@@ -67,7 +67,7 @@ func main() {
 		Scheme:                 scheme,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "zitadel-access-operator.access.zitadel.com",
+		LeaderElectionID:       "cf-zitadel-access-operator.access.zitadel.com",
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to create manager")
