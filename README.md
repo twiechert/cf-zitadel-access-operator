@@ -81,8 +81,6 @@ The secret must contain keys `zitadel-token` and `cloudflare-api-token`.
 
 ## Configuration
 
-| Flag | Env | Default | Description |
-|------|-----|---------|-------------|
 | Env | Flag | Default | Description |
 |-----|------|---------|-------------|
 | `ZITADEL_URL` | `--zitadel-url` | — | Zitadel instance URL |
