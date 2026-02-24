@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -47,6 +48,7 @@ type SecuredApplicationReconciler struct {
 // +kubebuilder:rbac:groups=access.zitadel.com,resources=securedapplications/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=access.zitadel.com,resources=securedapplications/finalizers,verbs=update
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch
 
 func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -62,7 +64,15 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 	// Handle deletion.
 	if !app.DeletionTimestamp.IsZero() {
 		if controllerutil.ContainsFinalizer(&app, finalizerName) {
-			// Clean up Cloudflare Access Application.
+			// Delete Zitadel OIDC app.
+			if app.Status.ZitadelAppID != "" && app.Status.ProjectID != "" {
+				logger.Info("deleting Zitadel OIDC app", "appId", app.Status.ZitadelAppID)
+				if err := r.Zitadel.DeleteApp(ctx, app.Status.ProjectID, app.Status.ZitadelAppID); err != nil {
+					logger.Error(err, "failed to delete Zitadel app, will retry")
+					return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+				}
+			}
+			// Delete Cloudflare Access Application.
 			if app.Status.AccessApplicationID != "" {
 				logger.Info("deleting Cloudflare Access Application", "appId", app.Status.AccessApplicationID)
 				if err := r.Cloudflare.DeleteAccessApp(ctx, app.Status.AccessApplicationID); err != nil {
@@ -70,7 +80,7 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 					return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 				}
 			}
-			// Ingress (if any) is cleaned up via ownerReference GC.
+			// Ingress + Secret cleaned up via ownerReference GC.
 			controllerutil.RemoveFinalizer(&app, finalizerName)
 			if err := r.Update(ctx, &app); err != nil {
 				return ctrl.Result{}, err
@@ -113,7 +123,21 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		}
 	}
 
-	// 3. Reconcile Cloudflare Access Application with inline OIDC claim policies.
+	// 3. Reconcile Zitadel OIDC application.
+	oidcApp, clientSecret, err := r.reconcileZitadelApp(ctx, &app, project.ID)
+	if err != nil {
+		return r.setCondition(ctx, &app, metav1.ConditionFalse, "ZitadelAppFailed", err.Error())
+	}
+	logger.Info("reconciled Zitadel OIDC app", "appId", oidcApp.ID, "clientId", oidcApp.ClientID)
+
+	// Write credentials to K8s Secret (only on initial creation when we have the client secret).
+	if clientSecret != "" {
+		if err := r.writeCredentialSecret(ctx, &app, oidcApp.ClientID, clientSecret); err != nil {
+			return r.setCondition(ctx, &app, metav1.ConditionFalse, "SecretFailed", err.Error())
+		}
+	}
+
+	// 4. Reconcile Cloudflare Access Application with inline OIDC claim policies.
 	roleClaim := fmt.Sprintf("urn:zitadel:iam:org:project:%s:roles", project.ID)
 
 	accessAppID := app.Status.AccessApplicationID
@@ -155,28 +179,110 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return r.setCondition(ctx, &app, metav1.ConditionFalse, "PolicyFailed", err.Error())
 	}
 
-	// 4. Reconcile Ingress if tunnel is configured.
-	tunnelCreated := false
+	// 5. Reconcile Ingress if tunnel is configured.
 	if app.Spec.Tunnel != nil {
 		if err := r.reconcileIngress(ctx, &app); err != nil {
 			return r.setCondition(ctx, &app, metav1.ConditionFalse, "IngressFailed", err.Error())
 		}
-		tunnelCreated = true
 		logger.Info("reconciled ingress", "name", app.Name)
 	}
 
-	// 5. Update status.
+	// 6. Update status.
 	app.Status.ProjectID = project.ID
+	app.Status.ZitadelAppID = oidcApp.ID
+	app.Status.ClientID = oidcApp.ClientID
 	app.Status.AccessApplicationID = accessAppID
 	app.Status.AccessPolicyID = policy.ID
-	app.Status.TunnelCreated = tunnelCreated
 	app.Status.Ready = true
+	return r.setCondition(ctx, &app, metav1.ConditionTrue, "Reconciled", "All resources are up to date")
+}
 
-	msg := "Access Application is up to date"
-	if tunnelCreated {
-		msg = "Access Application and Ingress are up to date"
+func (r *SecuredApplicationReconciler) reconcileZitadelApp(ctx context.Context, app *accessv1alpha1.SecuredApplication, projectID string) (*zitadel.App, string, error) {
+	// Build OIDC config with defaults.
+	redirectURIs := []string{fmt.Sprintf("https://%s/callback", app.Spec.Host)}
+	if app.Spec.OIDC != nil && len(app.Spec.OIDC.RedirectURIs) > 0 {
+		redirectURIs = app.Spec.OIDC.RedirectURIs
 	}
-	return r.setCondition(ctx, &app, metav1.ConditionTrue, "Reconciled", msg)
+
+	config := zitadel.AppConfig{
+		Name:         app.Name,
+		RedirectURIs: redirectURIs,
+	}
+
+	if app.Spec.OIDC != nil {
+		config.PostLogoutRedirectURIs = app.Spec.OIDC.PostLogoutRedirectURIs
+		config.ResponseTypes = withDefault(app.Spec.OIDC.ResponseTypes, []string{"OIDC_RESPONSE_TYPE_CODE"})
+		config.GrantTypes = withDefault(app.Spec.OIDC.GrantTypes, []string{"OIDC_GRANT_TYPE_AUTHORIZATION_CODE"})
+		config.AppType = withDefault1(app.Spec.OIDC.AppType, "OIDC_APP_TYPE_WEB")
+		config.AuthMethodType = withDefault1(app.Spec.OIDC.AuthMethodType, "OIDC_AUTH_METHOD_TYPE_BASIC")
+		config.AccessTokenType = withDefault1(app.Spec.OIDC.AccessTokenType, "OIDC_TOKEN_TYPE_BEARER")
+		config.DevMode = app.Spec.OIDC.DevMode
+		config.IDTokenRoleAssertion = app.Spec.OIDC.IDTokenRoleAssertion
+		config.IDTokenUserinfoAssertion = app.Spec.OIDC.IDTokenUserinfoAssertion
+		config.AccessTokenRoleAssertion = app.Spec.OIDC.AccessTokenRoleAssertion
+	} else {
+		config.ResponseTypes = []string{"OIDC_RESPONSE_TYPE_CODE"}
+		config.GrantTypes = []string{"OIDC_GRANT_TYPE_AUTHORIZATION_CODE"}
+		config.AppType = "OIDC_APP_TYPE_WEB"
+		config.AuthMethodType = "OIDC_AUTH_METHOD_TYPE_BASIC"
+		config.AccessTokenType = "OIDC_TOKEN_TYPE_BEARER"
+	}
+
+	// Check if app already exists.
+	if app.Status.ZitadelAppID != "" {
+		if err := r.Zitadel.UpdateApp(ctx, projectID, app.Status.ZitadelAppID, config); err != nil {
+			return nil, "", err
+		}
+		return &zitadel.App{
+			ID:       app.Status.ZitadelAppID,
+			ClientID: app.Status.ClientID,
+		}, "", nil
+	}
+
+	// Try to find by name (re-adoption).
+	existing, err := r.Zitadel.GetAppByName(ctx, projectID, app.Name)
+	if err != nil {
+		return nil, "", err
+	}
+	if existing != nil {
+		if err := r.Zitadel.UpdateApp(ctx, projectID, existing.ID, config); err != nil {
+			return nil, "", err
+		}
+		return existing, "", nil
+	}
+
+	// Create new app — this is the only time we get the client secret.
+	created, err := r.Zitadel.CreateApp(ctx, projectID, config)
+	if err != nil {
+		return nil, "", err
+	}
+	return created, created.ClientSecret, nil
+}
+
+func (r *SecuredApplicationReconciler) writeCredentialSecret(ctx context.Context, app *accessv1alpha1.SecuredApplication, clientID, clientSecret string) error {
+	secretName := app.Name + "-oidc"
+	if app.Spec.OIDC != nil && app.Spec.OIDC.ClientSecretRef != "" {
+		secretName = app.Spec.OIDC.ClientSecretRef
+	}
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      secretName,
+			Namespace: app.Namespace,
+		},
+	}
+
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, secret, func() error {
+		if err := controllerutil.SetControllerReference(app, secret, r.Scheme); err != nil {
+			return err
+		}
+		secret.StringData = map[string]string{
+			"clientId":     clientID,
+			"clientSecret": clientSecret,
+		}
+		return nil
+	})
+	return err
 }
 
 func (r *SecuredApplicationReconciler) reconcileIngress(ctx context.Context, app *accessv1alpha1.SecuredApplication) error {
@@ -274,5 +380,20 @@ func (r *SecuredApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&accessv1alpha1.SecuredApplication{}).
 		Owns(&networkingv1.Ingress{}).
+		Owns(&corev1.Secret{}).
 		Complete(r)
+}
+
+func withDefault(val, def []string) []string {
+	if len(val) == 0 {
+		return def
+	}
+	return val
+}
+
+func withDefault1(val, def string) string {
+	if val == "" {
+		return def
+	}
+	return val
 }

@@ -4,25 +4,30 @@ metadata:
   name: grafana
   namespace: monitoring
 spec:
-  host: grafana.twiechert.de
+  host: grafana.example.com
   access:
     project: infrastructure
     roles:
       - admin
       - viewer
+  oidc:
+    redirectURIs:
+      - https://grafana.example.com/login/generic_oauth
+    idTokenRoleAssertion: true
+    accessTokenRoleAssertion: true
   tunnel:
     backend:
       serviceName: grafana
       servicePort: 3000
 ---
-# Access-only (no tunnel) — service already exposed via another ingress
+# Minimal — uses all defaults, no tunnel
 apiVersion: access.zitadel.com/v1alpha1
 kind: SecuredApplication
 metadata:
-  name: proxmox
-  namespace: infrastructure
+  name: internal-api
+  namespace: default
 spec:
-  host: proxmox.twiechert.de
+  host: api.example.com
   access:
     project: infrastructure
     roles:

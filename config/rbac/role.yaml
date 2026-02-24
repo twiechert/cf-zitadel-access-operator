@@ -5,6 +5,17 @@ metadata:
   name: zitadel-access-operator
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - access.zitadel.com
   resources:
   - securedapplications

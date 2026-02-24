@@ -21,9 +21,9 @@ spec:
     - jsonPath: .spec.access.project
       name: Project
       type: string
-    - jsonPath: .status.tunnelCreated
-      name: Tunnel
-      type: boolean
+    - jsonPath: .status.clientId
+      name: Client ID
+      type: string
     - jsonPath: .status.ready
       name: Ready
       type: boolean
@@ -34,9 +34,9 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          SecuredApplication declares a service protected with Zitadel role-based
-          access through Cloudflare Access. Optionally creates a Cloudflare Tunnel
-          Ingress for routing.
+          SecuredApplication registers an OIDC application in Zitadel, protects it
+          with a Cloudflare Access policy based on Zitadel roles, and optionally
+          creates an Ingress for routing.
         properties:
           apiVersion:
             description: |-
@@ -79,10 +79,66 @@ spec:
               host:
                 description: Host is the public hostname for this application.
                 type: string
+              oidc:
+                description: OIDC configures the Zitadel OIDC application.
+                properties:
+                  accessTokenRoleAssertion:
+                    description: AccessTokenRoleAssertion includes roles in the access
+                      token.
+                    type: boolean
+                  accessTokenType:
+                    description: AccessTokenType defaults to "OIDC_TOKEN_TYPE_BEARER".
+                    type: string
+                  appType:
+                    description: AppType defaults to "OIDC_APP_TYPE_WEB".
+                    type: string
+                  authMethodType:
+                    description: AuthMethodType defaults to "OIDC_AUTH_METHOD_TYPE_BASIC".
+                    type: string
+                  clientSecretRef:
+                    description: |-
+                      ClientSecretRef is the name of the Kubernetes Secret to write OIDC
+                      credentials to. Defaults to "{name}-oidc". The secret will contain
+                      "clientId" and "clientSecret" keys.
+                    type: string
+                  devMode:
+                    description: DevMode enables development mode (allows http redirect
+                      URIs).
+                    type: boolean
+                  grantTypes:
+                    description: GrantTypes defaults to ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE"].
+                    items:
+                      type: string
+                    type: array
+                  idTokenRoleAssertion:
+                    description: IDTokenRoleAssertion includes roles in the ID token.
+                    type: boolean
+                  idTokenUserinfoAssertion:
+                    description: IDTokenUserinfoAssertion includes userinfo in the
+                      ID token.
+                    type: boolean
+                  postLogoutRedirectURIs:
+                    description: PostLogoutRedirectURIs for the OIDC application.
+                    items:
+                      type: string
+                    type: array
+                  redirectURIs:
+                    description: |-
+                      RedirectURIs for the OIDC application.
+                      Defaults to ["https://{host}/callback"] if not specified.
+                    items:
+                      type: string
+                    type: array
+                  responseTypes:
+                    description: ResponseTypes defaults to ["OIDC_RESPONSE_TYPE_CODE"].
+                    items:
+                      type: string
+                    type: array
+                type: object
               tunnel:
                 description: |-
-                  Tunnel creates a Cloudflare Tunnel Ingress for routing.
-                  When omitted, only the Cloudflare Access Application is created.
+                  Tunnel creates an Ingress for routing (e.g. via Cloudflare Tunnel).
+                  When omitted, no Ingress is created.
                 properties:
                   backend:
                     description: Backend defines the Kubernetes Service to route traffic
@@ -112,7 +168,8 @@ spec:
                         description: Annotations to add to the generated Ingress.
                         type: object
                       className:
-                        description: ClassName overrides the default Ingress class.
+                        description: ClassName overrides the default Ingress class
+                          (defaults to "cloudflare-tunnel").
                         type: string
                       path:
                         description: Path defaults to "/".
@@ -136,6 +193,9 @@ spec:
                 type: string
               accessPolicyId:
                 description: AccessPolicyID is the Cloudflare Access Policy ID.
+                type: string
+              clientId:
+                description: ClientID is the OIDC client ID.
                 type: string
               conditions:
                 description: Conditions represent the latest available observations.
@@ -200,13 +260,11 @@ spec:
               ready:
                 description: Ready indicates the application is fully reconciled.
                 type: boolean
-              tunnelCreated:
-                description: TunnelCreated indicates an Ingress was created for tunnel
-                  routing.
-                type: boolean
+              zitadelAppId:
+                description: ZitadelAppID is the Zitadel OIDC application ID.
+                type: string
             required:
             - ready
-            - tunnelCreated
             type: object
         type: object
     served: true

@@ -8,13 +8,13 @@ import (
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Host",type=string,JSONPath=`.spec.host`
 // +kubebuilder:printcolumn:name="Project",type=string,JSONPath=`.spec.access.project`
-// +kubebuilder:printcolumn:name="Tunnel",type=boolean,JSONPath=`.status.tunnelCreated`
+// +kubebuilder:printcolumn:name="Client ID",type=string,JSONPath=`.status.clientId`
 // +kubebuilder:printcolumn:name="Ready",type=boolean,JSONPath=`.status.ready`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// SecuredApplication declares a service protected with Zitadel role-based
-// access through Cloudflare Access. Optionally creates a Cloudflare Tunnel
-// Ingress for routing.
+// SecuredApplication registers an OIDC application in Zitadel, protects it
+// with a Cloudflare Access policy based on Zitadel roles, and optionally
+// creates an Ingress for routing.
 type SecuredApplication struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -30,8 +30,12 @@ type SecuredApplicationSpec struct {
 	// Access defines the Zitadel project and roles required to access this application.
 	Access Access `json:"access"`
 
-	// Tunnel creates a Cloudflare Tunnel Ingress for routing.
-	// When omitted, only the Cloudflare Access Application is created.
+	// OIDC configures the Zitadel OIDC application.
+	// +optional
+	OIDC *OIDCConfig `json:"oidc,omitempty"`
+
+	// Tunnel creates an Ingress for routing (e.g. via Cloudflare Tunnel).
+	// When omitted, no Ingress is created.
 	// +optional
 	Tunnel *TunnelConfig `json:"tunnel,omitempty"`
 }
@@ -43,6 +47,59 @@ type Access struct {
 	// Roles lists the Zitadel project roles allowed to access this application.
 	// +kubebuilder:validation:MinItems=1
 	Roles []string `json:"roles"`
+}
+
+type OIDCConfig struct {
+	// RedirectURIs for the OIDC application.
+	// Defaults to ["https://{host}/callback"] if not specified.
+	// +optional
+	RedirectURIs []string `json:"redirectURIs,omitempty"`
+
+	// PostLogoutRedirectURIs for the OIDC application.
+	// +optional
+	PostLogoutRedirectURIs []string `json:"postLogoutRedirectURIs,omitempty"`
+
+	// ResponseTypes defaults to ["OIDC_RESPONSE_TYPE_CODE"].
+	// +optional
+	ResponseTypes []string `json:"responseTypes,omitempty"`
+
+	// GrantTypes defaults to ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE"].
+	// +optional
+	GrantTypes []string `json:"grantTypes,omitempty"`
+
+	// AppType defaults to "OIDC_APP_TYPE_WEB".
+	// +optional
+	AppType string `json:"appType,omitempty"`
+
+	// AuthMethodType defaults to "OIDC_AUTH_METHOD_TYPE_BASIC".
+	// +optional
+	AuthMethodType string `json:"authMethodType,omitempty"`
+
+	// AccessTokenType defaults to "OIDC_TOKEN_TYPE_BEARER".
+	// +optional
+	AccessTokenType string `json:"accessTokenType,omitempty"`
+
+	// DevMode enables development mode (allows http redirect URIs).
+	// +optional
+	DevMode bool `json:"devMode,omitempty"`
+
+	// IDTokenRoleAssertion includes roles in the ID token.
+	// +optional
+	IDTokenRoleAssertion bool `json:"idTokenRoleAssertion,omitempty"`
+
+	// IDTokenUserinfoAssertion includes userinfo in the ID token.
+	// +optional
+	IDTokenUserinfoAssertion bool `json:"idTokenUserinfoAssertion,omitempty"`
+
+	// AccessTokenRoleAssertion includes roles in the access token.
+	// +optional
+	AccessTokenRoleAssertion bool `json:"accessTokenRoleAssertion,omitempty"`
+
+	// ClientSecretRef is the name of the Kubernetes Secret to write OIDC
+	// credentials to. Defaults to "{name}-oidc". The secret will contain
+	// "clientId" and "clientSecret" keys.
+	// +optional
+	ClientSecretRef string `json:"clientSecretRef,omitempty"`
 }
 
 type TunnelConfig struct {
@@ -67,7 +124,7 @@ type Backend struct {
 }
 
 type IngressConfig struct {
-	// ClassName overrides the default Ingress class.
+	// ClassName overrides the default Ingress class (defaults to "cloudflare-tunnel").
 	// +optional
 	ClassName string `json:"className,omitempty"`
 
@@ -88,14 +145,17 @@ type SecuredApplicationStatus struct {
 	// ProjectID is the resolved Zitadel project ID.
 	ProjectID string `json:"projectId,omitempty"`
 
+	// ZitadelAppID is the Zitadel OIDC application ID.
+	ZitadelAppID string `json:"zitadelAppId,omitempty"`
+
+	// ClientID is the OIDC client ID.
+	ClientID string `json:"clientId,omitempty"`
+
 	// AccessApplicationID is the Cloudflare Access Application ID.
 	AccessApplicationID string `json:"accessApplicationId,omitempty"`
 
 	// AccessPolicyID is the Cloudflare Access Policy ID.
 	AccessPolicyID string `json:"accessPolicyId,omitempty"`
-
-	// TunnelCreated indicates an Ingress was created for tunnel routing.
-	TunnelCreated bool `json:"tunnelCreated"`
 
 	// Ready indicates the application is fully reconciled.
 	Ready bool `json:"ready"`
