@@ -24,6 +24,8 @@ cloudflare:
   accountId: ""
   # Required: Cloudflare Access IdP ID (the Zitadel OIDC identity provider)
   idpId: ""
+  # Tunnel name (only needed when the tunnel sub-chart is enabled)
+  tunnelName: ""
 
 # Operator behaviour
 config:
@@ -45,3 +47,20 @@ resources: {}
 nodeSelector: {}
 
 tolerations: []
+
+# Cloudflare Tunnel Ingress Controller (optional sub-chart)
+# Enable to install the STRRL cloudflare-tunnel-ingress-controller alongside the operator.
+# See https://github.com/STRRL/cloudflare-tunnel-ingress-controller for details.
+# When enabled, configure it to use the operator's shared secret to avoid
+# duplicating Cloudflare credentials. Just set cloudflare.tunnelName above, then:
+#
+# cloudflare-tunnel-ingress-controller:
+#   enabled: true
+#   cloudflare:
+#     secretRef:
+#       name: <release-name>-cf-zitadel-access-operator
+#       apiTokenKey: cloudflare-api-token
+#       accountIDKey: cloudflare-account-id
+#       tunnelNameKey: cloudflare-tunnel-name
+cloudflare-tunnel-ingress-controller:
+  enabled: false

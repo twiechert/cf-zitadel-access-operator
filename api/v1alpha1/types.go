@@ -66,8 +66,24 @@ type Access struct {
 	Project string `json:"project"`
 
 	// Roles lists the Zitadel project roles allowed to access this application.
-	// +kubebuilder:validation:MinItems=1
-	Roles []string `json:"roles"`
+	// These are checked against the custom:roles OIDC claim in the CF Access policy.
+	// +optional
+	Roles []string `json:"roles,omitempty"`
+
+	// Claims defines additional OIDC claim checks for the CF Access policy.
+	// Each claim is checked against the specified value.
+	// +optional
+	Claims []ClaimCheck `json:"claims,omitempty"`
+}
+
+// ClaimCheck defines an OIDC claim name/value pair for a Cloudflare Access policy rule.
+// At least one of roles or claims must be set on the parent Access struct.
+type ClaimCheck struct {
+	// Name is the OIDC claim name (e.g. "custom:department").
+	Name string `json:"name"`
+
+	// Value is the required claim value.
+	Value string `json:"value"`
 }
 
 type Backend struct {
@@ -83,14 +99,17 @@ type Backend struct {
 }
 
 type NativeOIDCConfig struct {
-	// RedirectURIs for the OIDC application.
-	// Defaults to ["https://{host}/callback"] if not specified.
+	// RedirectPath is the path portion of the OIDC redirect URI.
+	// The operator constructs the full URI as https://{nativeOIDC.ingress.host}{redirectPath}
+	// when an OIDC ingress is configured, or https://{spec.host}{redirectPath} otherwise.
+	// Defaults to "/callback".
 	// +optional
-	RedirectURIs []string `json:"redirectURIs,omitempty"`
+	RedirectPath string `json:"redirectPath,omitempty"`
 
-	// PostLogoutRedirectURIs for the OIDC application.
+	// PostLogoutRedirectPath is the path portion of the post-logout redirect URI.
+	// Constructed the same way as redirectPath.
 	// +optional
-	PostLogoutRedirectURIs []string `json:"postLogoutRedirectURIs,omitempty"`
+	PostLogoutRedirectPath string `json:"postLogoutRedirectPath,omitempty"`
 
 	// ResponseTypes defaults to ["OIDC_RESPONSE_TYPE_CODE"].
 	// +optional

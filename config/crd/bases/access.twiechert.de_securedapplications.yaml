@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: securedapplications.access.zitadel.com
+  name: securedapplications.access.twiechert.de
 spec:
-  group: access.zitadel.com
+  group: access.twiechert.de
   names:
     kind: SecuredApplication
     listKind: SecuredApplicationList
@@ -61,20 +61,39 @@ spec:
                 description: Access defines the Zitadel project and roles required
                   to access this application.
                 properties:
+                  claims:
+                    description: |-
+                      Claims defines additional OIDC claim checks for the CF Access policy.
+                      Each claim is checked against the specified value.
+                    items:
+                      description: |-
+                        ClaimCheck defines an OIDC claim name/value pair for a Cloudflare Access policy rule.
+                        At least one of roles or claims must be set on the parent Access struct.
+                      properties:
+                        name:
+                          description: Name is the OIDC claim name (e.g. "custom:department").
+                          type: string
+                        value:
+                          description: Value is the required claim value.
+                          type: string
+                      required:
+                      - name
+                      - value
+                      type: object
+                    type: array
                   project:
                     description: Project is the Zitadel project name. The operator
                       resolves this to a project ID.
                     type: string
                   roles:
-                    description: Roles lists the Zitadel project roles allowed to
-                      access this application.
+                    description: |-
+                      Roles lists the Zitadel project roles allowed to access this application.
+                      These are checked against the custom:roles OIDC claim in the CF Access policy.
                     items:
                       type: string
-                    minItems: 1
                     type: array
                 required:
                 - project
-                - roles
                 type: object
               backend:
                 description: Backend defines the Kubernetes Service to route traffic
@@ -203,18 +222,18 @@ spec:
                     - className
                     - host
                     type: object
-                  postLogoutRedirectURIs:
-                    description: PostLogoutRedirectURIs for the OIDC application.
-                    items:
-                      type: string
-                    type: array
-                  redirectURIs:
+                  postLogoutRedirectPath:
                     description: |-
-                      RedirectURIs for the OIDC application.
-                      Defaults to ["https://{host}/callback"] if not specified.
-                    items:
-                      type: string
-                    type: array
+                      PostLogoutRedirectPath is the path portion of the post-logout redirect URI.
+                      Constructed the same way as redirectPath.
+                    type: string
+                  redirectPath:
+                    description: |-
+                      RedirectPath is the path portion of the OIDC redirect URI.
+                      The operator constructs the full URI as https://{nativeOIDC.ingress.host}{redirectPath}
+                      when an OIDC ingress is configured, or https://{spec.host}{redirectPath} otherwise.
+                      Defaults to "/callback".
+                    type: string
                   responseTypes:
                     description: ResponseTypes defaults to ["OIDC_RESPONSE_TYPE_CODE"].
                     items:

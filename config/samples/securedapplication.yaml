@@ -1,5 +1,5 @@
 # Minimal — CF Access protection + Zitadel app registration
-apiVersion: access.zitadel.com/v1alpha1
+apiVersion: access.twiechert.de/v1alpha1
 kind: SecuredApplication
 metadata:
   name: wiki
@@ -15,7 +15,7 @@ spec:
     servicePort: 8080
 ---
 # Native OIDC — app handles its own OAuth (e.g. Grafana) with a direct Ingress
-apiVersion: access.zitadel.com/v1alpha1
+apiVersion: access.twiechert.de/v1alpha1
 kind: SecuredApplication
 metadata:
   name: grafana
@@ -31,8 +31,7 @@ spec:
     serviceName: grafana
     servicePort: 3000
   nativeOIDC:
-    redirectURIs:
-      - https://grafana-internal.example.com/login/generic_oauth
+    redirectPath: /login/generic_oauth
     idTokenRoleAssertion: true
     accessTokenRoleAssertion: true
     clientSecretRef: grafana-oidc

@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	GroupVersion = schema.GroupVersion{Group: "access.zitadel.com", Version: "v1alpha1"}
+	GroupVersion = schema.GroupVersion{Group: "access.twiechert.de", Version: "v1alpha1"}
 
 	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}
 
