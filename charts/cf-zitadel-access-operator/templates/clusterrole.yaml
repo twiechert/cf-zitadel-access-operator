@@ -6,7 +6,7 @@ metadata:
     {{- include "cf-zitadel-access-operator.labels" . | nindent 4 }}
 rules:
   - apiGroups:
-      - access.zitadel.com
+      - access.twiechert.de
     resources:
       - securedapplications
     verbs:
@@ -18,13 +18,13 @@ rules:
       - update
       - watch
   - apiGroups:
-      - access.zitadel.com
+      - access.twiechert.de
     resources:
       - securedapplications/finalizers
     verbs:
       - update
   - apiGroups:
-      - access.zitadel.com
+      - access.twiechert.de
     resources:
       - securedapplications/status
     verbs:

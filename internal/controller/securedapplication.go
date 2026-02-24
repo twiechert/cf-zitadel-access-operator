@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	finalizerName = "access.zitadel.com/finalizer"
+	finalizerName = "access.twiechert.de/finalizer"
 
 	// The custom:roles claim is a flat array produced by a Zitadel Action (flatRoles).
 	// Cloudflare Access can't match Zitadel's default nested role claim format.
@@ -48,9 +48,9 @@ type SecuredApplicationReconciler struct {
 	Config     Config
 }
 
-// +kubebuilder:rbac:groups=access.zitadel.com,resources=securedapplications,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=access.zitadel.com,resources=securedapplications/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=access.zitadel.com,resources=securedapplications/finalizers,verbs=update
+// +kubebuilder:rbac:groups=access.twiechert.de,resources=securedapplications,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=access.twiechert.de,resources=securedapplications/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=access.twiechert.de,resources=securedapplications/finalizers,verbs=update
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch
 
@@ -113,20 +113,28 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 			fmt.Sprintf("Zitadel project %q not found", app.Spec.Access.Project))
 	}
 
-	// 2. Validate that all requested roles exist.
-	existingRoles, err := r.Zitadel.ListProjectRoles(ctx, project.ID)
-	if err != nil {
-		return r.setCondition(ctx, &app, metav1.ConditionFalse, "RoleLookupFailed", err.Error())
-	}
-	roleSet := make(map[string]bool, len(existingRoles))
-	for _, role := range existingRoles {
-		roleSet[role.Key] = true
-	}
-	for _, requested := range app.Spec.Access.Roles {
-		if !roleSet[requested] {
-			return r.setCondition(ctx, &app, metav1.ConditionFalse, "RoleNotFound",
-				fmt.Sprintf("role %q does not exist in Zitadel project %q", requested, app.Spec.Access.Project))
+	// 2. Validate that all requested roles exist (only if roles are specified).
+	if len(app.Spec.Access.Roles) > 0 {
+		existingRoles, err := r.Zitadel.ListProjectRoles(ctx, project.ID)
+		if err != nil {
+			return r.setCondition(ctx, &app, metav1.ConditionFalse, "RoleLookupFailed", err.Error())
 		}
+		roleSet := make(map[string]bool, len(existingRoles))
+		for _, role := range existingRoles {
+			roleSet[role.Key] = true
+		}
+		for _, requested := range app.Spec.Access.Roles {
+			if !roleSet[requested] {
+				return r.setCondition(ctx, &app, metav1.ConditionFalse, "RoleNotFound",
+					fmt.Sprintf("role %q does not exist in Zitadel project %q", requested, app.Spec.Access.Project))
+			}
+		}
+	}
+
+	// Validate that at least one of roles or claims is specified.
+	if len(app.Spec.Access.Roles) == 0 && len(app.Spec.Access.Claims) == 0 {
+		return r.setCondition(ctx, &app, metav1.ConditionFalse, "InvalidAccess",
+			"at least one of roles or claims must be specified")
 	}
 
 	// 3. Reconcile Zitadel OIDC application.
@@ -169,13 +177,21 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 		logger.Info("created Access Application", "appId", accessAppID)
 	}
 
-	rules := make([]cfclient.OIDCClaimRule, len(app.Spec.Access.Roles))
-	for i, role := range app.Spec.Access.Roles {
-		rules[i] = cfclient.OIDCClaimRule{
+	// Build CF Access policy rules from both roles and claims.
+	var rules []cfclient.OIDCClaimRule
+	for _, role := range app.Spec.Access.Roles {
+		rules = append(rules, cfclient.OIDCClaimRule{
 			IdentityProviderID: r.Config.CloudflareIdPID,
 			ClaimName:          roleClaimName,
 			ClaimValue:         role,
-		}
+		})
+	}
+	for _, claim := range app.Spec.Access.Claims {
+		rules = append(rules, cfclient.OIDCClaimRule{
+			IdentityProviderID: r.Config.CloudflareIdPID,
+			ClaimName:          claim.Name,
+			ClaimValue:         claim.Value,
+		})
 	}
 
 	policy, err := r.Cloudflare.UpsertAccessPolicy(ctx, accessAppID, app.Status.AccessPolicyID, rules)
@@ -208,10 +224,12 @@ func (r *SecuredApplicationReconciler) Reconcile(ctx context.Context, req ctrl.R
 }
 
 func (r *SecuredApplicationReconciler) reconcileZitadelApp(ctx context.Context, app *accessv1alpha1.SecuredApplication, projectID string) (*zitadel.App, string, error) {
-	redirectURIs := []string{fmt.Sprintf("https://%s/callback", app.Spec.Host)}
+	// Construct redirect URI from host + path.
+	redirectHost := app.Spec.Host
+	redirectPath := "/callback"
+
 	config := zitadel.AppConfig{
 		Name:            app.Name,
-		RedirectURIs:    redirectURIs,
 		ResponseTypes:   []string{"OIDC_RESPONSE_TYPE_CODE"},
 		GrantTypes:      []string{"OIDC_GRANT_TYPE_AUTHORIZATION_CODE"},
 		AppType:         "OIDC_APP_TYPE_WEB",
@@ -220,10 +238,15 @@ func (r *SecuredApplicationReconciler) reconcileZitadelApp(ctx context.Context, 
 	}
 
 	if app.Spec.NativeOIDC != nil {
-		if len(app.Spec.NativeOIDC.RedirectURIs) > 0 {
-			config.RedirectURIs = app.Spec.NativeOIDC.RedirectURIs
+		if app.Spec.NativeOIDC.Ingress != nil {
+			redirectHost = app.Spec.NativeOIDC.Ingress.Host
 		}
-		config.PostLogoutRedirectURIs = app.Spec.NativeOIDC.PostLogoutRedirectURIs
+		if app.Spec.NativeOIDC.RedirectPath != "" {
+			redirectPath = app.Spec.NativeOIDC.RedirectPath
+		}
+		if app.Spec.NativeOIDC.PostLogoutRedirectPath != "" {
+			config.PostLogoutRedirectURIs = []string{fmt.Sprintf("https://%s%s", redirectHost, app.Spec.NativeOIDC.PostLogoutRedirectPath)}
+		}
 		if len(app.Spec.NativeOIDC.ResponseTypes) > 0 {
 			config.ResponseTypes = app.Spec.NativeOIDC.ResponseTypes
 		}
@@ -244,6 +267,8 @@ func (r *SecuredApplicationReconciler) reconcileZitadelApp(ctx context.Context, 
 		config.IDTokenUserinfoAssertion = app.Spec.NativeOIDC.IDTokenUserinfoAssertion
 		config.AccessTokenRoleAssertion = app.Spec.NativeOIDC.AccessTokenRoleAssertion
 	}
+
+	config.RedirectURIs = []string{fmt.Sprintf("https://%s%s", redirectHost, redirectPath)}
 
 	// Update existing app.
 	if app.Status.ZitadelAppID != "" {

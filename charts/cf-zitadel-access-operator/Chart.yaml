@@ -4,3 +4,9 @@ description: A Kubernetes operator that provisions Zitadel OIDC apps and Cloudfl
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
+
+dependencies:
+  - name: cloudflare-tunnel-ingress-controller
+    version: "0.0.22"
+    repository: "https://helm.strrl.dev"
+    condition: cloudflare-tunnel-ingress-controller.enabled

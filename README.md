@@ -10,6 +10,7 @@ From a single `SecuredApplication` CR, the operator provisions resources across 
 - A [Zitadel Action](https://zitadel.com/docs/apis/actions/code-examples) (`flatRoles`) that maps project roles to the `custom:roles` claim as a flat array — Cloudflare Access can't match Zitadel's default nested role format
 - Zitadel configured as an [Identity Provider in Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/identity/idp-integration/generic-oidc/)
 - A Cloudflare API token with Access permissions
+- [cloudflare-tunnel-ingress-controller](https://github.com/STRRL/cloudflare-tunnel-ingress-controller) installed in the cluster (provides the `cloudflare-tunnel` IngressClass). Can be installed as a Helm sub-chart dependency — see [Installation](#installation)
 
 ## How it works
 
@@ -53,7 +54,7 @@ Internal user → grafana-internal.example.com
 ### Basic (CF Access protection only)
 
 ```yaml
-apiVersion: access.zitadel.com/v1alpha1
+apiVersion: access.twiechert.de/v1alpha1
 kind: SecuredApplication
 metadata:
   name: wiki
@@ -72,7 +73,7 @@ The backend doesn't need to know about OIDC — Cloudflare Access handles everyt
 ### With native OIDC (e.g. Grafana)
 
 ```yaml
-apiVersion: access.zitadel.com/v1alpha1
+apiVersion: access.twiechert.de/v1alpha1
 kind: SecuredApplication
 metadata:
   name: grafana
@@ -85,8 +86,7 @@ spec:
     serviceName: grafana
     servicePort: 3000
   nativeOIDC:
-    redirectURIs:
-      - https://grafana-internal.example.com/login/generic_oauth
+    redirectPath: /login/generic_oauth
     idTokenRoleAssertion: true
     accessTokenRoleAssertion: true
     ingress:
@@ -131,6 +131,22 @@ helm install cf-zitadel-access-operator \
 ```
 
 The secret must contain keys `zitadel-token` and `cloudflare-api-token`.
+
+### With Cloudflare Tunnel Ingress Controller
+
+The chart can optionally install the [cloudflare-tunnel-ingress-controller](https://github.com/STRRL/cloudflare-tunnel-ingress-controller) as a sub-chart dependency. The operator's secret stores all Cloudflare credentials, so the sub-chart can reference it via `secretRef` — no need to pass them twice:
+
+```bash
+helm install cf-zitadel-access-operator \
+  oci://ghcr.io/twiechert/charts/cf-zitadel-access-operator \
+  --set cloudflare.tunnelName=my-tunnel \
+  --set cloudflare-tunnel-ingress-controller.enabled=true \
+  --set cloudflare-tunnel-ingress-controller.cloudflare.secretRef.name=cf-zitadel-access-operator-cf-zitadel-access-operator \
+  --set cloudflare-tunnel-ingress-controller.cloudflare.secretRef.apiTokenKey=cloudflare-api-token \
+  --set cloudflare-tunnel-ingress-controller.cloudflare.secretRef.accountIDKey=cloudflare-account-id \
+  --set cloudflare-tunnel-ingress-controller.cloudflare.secretRef.tunnelNameKey=cloudflare-tunnel-name \
+  # ... other operator values
+```
 
 ## Configuration
 

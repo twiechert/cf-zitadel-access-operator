@@ -67,7 +67,7 @@ func main() {
 		Scheme:                 scheme,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "cf-zitadel-access-operator.access.zitadel.com",
+		LeaderElectionID:       "cf-zitadel-access-operator.access.twiechert.de",
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to create manager")
