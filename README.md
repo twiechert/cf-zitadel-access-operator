@@ -83,13 +83,15 @@ The secret must contain keys `zitadel-token` and `cloudflare-api-token`.
 
 | Flag | Env | Default | Description |
 |------|-----|---------|-------------|
-| `--zitadel-url` | `ZITADEL_URL` | — | Zitadel instance URL |
-| `--zitadel-token` | `ZITADEL_TOKEN` | — | Zitadel PAT |
-| `--cloudflare-api-token` | `CLOUDFLARE_API_TOKEN` | — | Cloudflare API token |
-| `--cloudflare-account-id` | `CLOUDFLARE_ACCOUNT_ID` | — | Cloudflare account ID |
-| `--cloudflare-idp-id` | `CLOUDFLARE_IDP_ID` | — | CF Access Identity Provider ID for Zitadel |
-| `--session-duration` | — | `24h` | CF Access session duration |
-| `--leader-elect` | — | `false` | Enable leader election |
+| Env | Flag | Default | Description |
+|-----|------|---------|-------------|
+| `ZITADEL_URL` | `--zitadel-url` | — | Zitadel instance URL |
+| `ZITADEL_TOKEN` | — | — | Zitadel PAT (env-only, never in args) |
+| `CLOUDFLARE_API_TOKEN` | — | — | Cloudflare API token (env-only, never in args) |
+| `CLOUDFLARE_ACCOUNT_ID` | `--cloudflare-account-id` | — | Cloudflare account ID |
+| `CLOUDFLARE_IDP_ID` | `--cloudflare-idp-id` | — | CF Access Identity Provider ID for Zitadel |
+| — | `--session-duration` | `24h` | CF Access session duration |
+| — | `--leader-elect` | `false` | Enable leader election |
 
 ## Development
 

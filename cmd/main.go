@@ -30,8 +30,6 @@ func main() {
 		probeAddr            string
 		enableLeaderElection bool
 		zitadelURL           string
-		zitadelToken         string
-		cfAPIToken           string
 		cfAccountID          string
 		cfIdPID              string
 		sessionDuration      string
@@ -41,11 +39,13 @@ func main() {
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the health probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false, "Enable leader election.")
 	flag.StringVar(&zitadelURL, "zitadel-url", os.Getenv("ZITADEL_URL"), "Base URL of the Zitadel instance.")
-	flag.StringVar(&zitadelToken, "zitadel-token", os.Getenv("ZITADEL_TOKEN"), "Personal Access Token for Zitadel Management API.")
-	flag.StringVar(&cfAPIToken, "cloudflare-api-token", os.Getenv("CLOUDFLARE_API_TOKEN"), "Cloudflare API token.")
 	flag.StringVar(&cfAccountID, "cloudflare-account-id", os.Getenv("CLOUDFLARE_ACCOUNT_ID"), "Cloudflare account ID.")
 	flag.StringVar(&cfIdPID, "cloudflare-idp-id", os.Getenv("CLOUDFLARE_IDP_ID"), "Cloudflare Access Identity Provider ID for Zitadel.")
 	flag.StringVar(&sessionDuration, "session-duration", "24h", "Cloudflare Access session duration.")
+
+	// Sensitive values — env-only, never exposed as CLI flags.
+	zitadelToken := os.Getenv("ZITADEL_TOKEN")
+	cfAPIToken := os.Getenv("CLOUDFLARE_API_TOKEN")
 
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
@@ -55,11 +55,11 @@ func main() {
 	setupLog := ctrl.Log.WithName("setup")
 
 	if zitadelURL == "" || zitadelToken == "" {
-		setupLog.Error(nil, "zitadel-url and zitadel-token are required")
+		setupLog.Error(nil, "ZITADEL_URL and ZITADEL_TOKEN env vars are required")
 		os.Exit(1)
 	}
 	if cfAPIToken == "" || cfAccountID == "" || cfIdPID == "" {
-		setupLog.Error(nil, "cloudflare-api-token, cloudflare-account-id, and cloudflare-idp-id are required")
+		setupLog.Error(nil, "CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, and CLOUDFLARE_IDP_ID are required")
 		os.Exit(1)
 	}
 

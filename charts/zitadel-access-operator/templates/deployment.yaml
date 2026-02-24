@@ -21,9 +21,6 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
-            - --zitadel-url={{ .Values.zitadel.url }}
-            - --cloudflare-account-id={{ .Values.cloudflare.accountId }}
-            - --cloudflare-idp-id={{ .Values.cloudflare.idpId }}
             - --session-duration={{ .Values.config.sessionDuration }}
             - --metrics-bind-address=:8080
             - --health-probe-bind-address=:8081
@@ -31,6 +28,8 @@ spec:
             - --leader-elect
             {{- end }}
           env:
+            - name: ZITADEL_URL
+              value: {{ .Values.zitadel.url | quote }}
             - name: ZITADEL_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -41,6 +40,10 @@ spec:
                 secretKeyRef:
                   name: {{ include "zitadel-access-operator.secretName" . }}
                   key: cloudflare-api-token
+            - name: CLOUDFLARE_ACCOUNT_ID
+              value: {{ .Values.cloudflare.accountId | quote }}
+            - name: CLOUDFLARE_IDP_ID
+              value: {{ .Values.cloudflare.idpId | quote }}
           ports:
             - name: metrics
               containerPort: 8080
