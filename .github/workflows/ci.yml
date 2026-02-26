@@ -62,6 +62,11 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Build Helm dependencies
+        run: |
+          helm repo add strrl https://helm.strrl.dev
+          helm dependency build charts/cf-zitadel-access-operator
+
       - name: Push Helm chart to GHCR
         if: github.event_name == 'push'
         run: |

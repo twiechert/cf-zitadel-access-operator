@@ -19,3 +19,6 @@ bin/
 
 # Helm dependency archives
 charts/*/charts/*.tgz
+
+# Claude Code
+.claude/
