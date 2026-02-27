@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // Project represents a Zitadel project.
@@ -233,6 +234,11 @@ func (c *httpClient) UpdateApp(ctx context.Context, projectID, appID string, con
 	path := fmt.Sprintf("/management/v1/projects/%s/apps/%s/oidc_config", projectID, appID)
 	_, err := c.do(ctx, http.MethodPut, path, config)
 	if err != nil {
+		// Zitadel returns 400 "No changes" when the config is already identical.
+		// Treat this as a successful no-op.
+		if strings.Contains(err.Error(), "No changes") {
+			return nil
+		}
 		return fmt.Errorf("update app: %w", err)
 	}
 	return nil
