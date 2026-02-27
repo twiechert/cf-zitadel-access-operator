@@ -230,7 +230,7 @@ func (c *httpClient) CreateApp(ctx context.Context, projectID string, config App
 }
 
 func (c *httpClient) UpdateApp(ctx context.Context, projectID, appID string, config AppConfig) error {
-	path := fmt.Sprintf("/management/v1/projects/%s/apps/%s/oidc", projectID, appID)
+	path := fmt.Sprintf("/management/v1/projects/%s/apps/%s/oidc_config", projectID, appID)
 	_, err := c.do(ctx, http.MethodPut, path, config)
 	if err != nil {
 		return fmt.Errorf("update app: %w", err)
